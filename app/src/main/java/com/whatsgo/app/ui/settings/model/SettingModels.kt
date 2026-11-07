@@ -1,4 +1,3 @@
-// ui/settings/model/SettingModels.kt
 package com.whatsgo.app.ui.settings.model
 
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -23,16 +22,13 @@ data class SettingDefinition(
     val icon: ImageVector? = null,
     val categoryId: String = "",
 
-    // TOGGLE
     val defaultValue: Boolean = false,
     val enabledIf: (() -> Boolean)? = null,
     val disabledSubtitle: String = "",
 
-    // SINGLE_SELECT
     val options: List<SelectOption> = emptyList(),
     val defaultOptionKey: String = "",
 
-    // ACTION
     val isDestructive: Boolean = false
 )
 

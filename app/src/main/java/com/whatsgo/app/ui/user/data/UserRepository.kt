@@ -1,4 +1,3 @@
-// ui/user/data/UserRepository.kt — Room-backed, no DataStore
 package com.whatsgo.app.ui.user.data
 
 import com.whatsgo.app.core.ChatSession

@@ -1,4 +1,3 @@
-// ui/settings/components/SettingsComponents.kt
 package com.whatsgo.app.ui.settings.components
 
 import androidx.compose.foundation.background

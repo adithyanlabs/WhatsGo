@@ -63,7 +63,6 @@ fun ChatList(
             itemsIndexed(chats, key = { _, chat -> chat.id }) { index, chat ->
                 ChatRow(chat = chat, onClick = { onChatClick(chat) })
 
-                // Optional subtle divider between items
                 if (index < chats.lastIndex) {
                     HorizontalDivider(
                         modifier = Modifier.padding(start = 82.dp),

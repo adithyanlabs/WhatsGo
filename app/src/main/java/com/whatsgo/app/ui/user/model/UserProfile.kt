@@ -1,4 +1,3 @@
-// ui/user/model/UserProfile.kt
 package com.whatsgo.app.ui.user.model
 
 data class UserProfile(

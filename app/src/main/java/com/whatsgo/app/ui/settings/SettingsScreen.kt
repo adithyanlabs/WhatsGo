@@ -54,7 +54,6 @@ fun SettingsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Category cards
         SettingsRegistry.categories.forEach { cat ->
             CategoryCard(
                 icon = cat.icon,
@@ -67,7 +66,6 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Logout
         OutlinedButton(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth().height(52.dp),

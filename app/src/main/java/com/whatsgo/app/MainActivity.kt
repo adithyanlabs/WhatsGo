@@ -33,7 +33,6 @@ class MainActivity : ComponentActivity() {
             var loggedIn by remember { mutableStateOf(session.isLoggedIn()) }
             val scope = rememberCoroutineScope()
 
-            // Android 13+ needs runtime permission for notifications.
             val notificationPermissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { /* Result ignored: service still runs if denied, notification just hidden. */ }

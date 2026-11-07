@@ -86,7 +86,6 @@ private fun friendlyPairingError(raw: String): String {
 private fun copyToClipboard(context: Context, label: String, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
-    // Android 13+ shows its own "Copied" confirmation. Older versions need a toast.
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         Toast.makeText(context, "Code copied", Toast.LENGTH_SHORT).show()
     }
@@ -107,7 +106,6 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(event) {
-        // Ignore stale events until user actually requested a code.
         if (!isConnecting) return@LaunchedEffect
         when (event) {
             is LoginEvent.PairingReady -> {
@@ -125,7 +123,6 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
         }
     }
 
-    // Reset "copied" check icon after 2s.
     LaunchedEffect(copied) {
         if (copied) {
             delay(2000)

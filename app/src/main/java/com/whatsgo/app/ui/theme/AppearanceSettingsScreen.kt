@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,7 +23,6 @@ fun AppearanceSettingsScreen(
     onNavigateUp: () -> Unit,
     viewModel: ThemeViewModel = viewModel()
 ) {
-    // 1. Observe current theme settings
     val settings by viewModel.settings.collectAsState()
     val supportsDynamicColor = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
@@ -47,10 +47,6 @@ fun AppearanceSettingsScreen(
         ) {
             Spacer(Modifier.height(8.dp))
 
-            // ==========================================
-            // 1. Wallpaper Colors (Dynamic Color) Toggle
-            // Matches SettingsRegistry "dynamic_color"
-            // ==========================================
             val isDynamicEnabled = settings.dynamicColorEnabled && supportsDynamicColor
 
             Row(
@@ -92,12 +88,8 @@ fun AppearanceSettingsScreen(
                 )
             }
 
-            Divider()
+            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
-            // ==========================================
-            // 2. Dark Mode Selection (System / Light / Dark)
-            // Matches SettingsRegistry "dark_mode"
-            // ==========================================
             Text(
                 text = "Theme",
                 style = MaterialTheme.typography.titleSmall,

@@ -10,14 +10,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-// 1. REMOVE 'private' and rename to 'appSettingsDataStore' so it can be shared
 val Context.appSettingsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "whatsgo_settings"
 )
 
 class SettingsRepository(private val context: Context) {
 
-    // 2. Update this reference to use the new name
     private val ds = context.appSettingsDataStore
 
     fun observeBoolean(id: String, default: Boolean = false): Flow<Boolean> =

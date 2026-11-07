@@ -1,4 +1,3 @@
-// ui/settings/SettingsCategoryScreen.kt
 package com.whatsgo.app.ui.settings
 
 import androidx.compose.foundation.layout.*
@@ -13,7 +12,6 @@ import com.whatsgo.app.ui.settings.components.SingleSelectCard
 import com.whatsgo.app.ui.settings.components.ToggleCard
 import com.whatsgo.app.ui.settings.model.SettingType
 
-// ✅ No Scaffold, no TopAppBar — the parent handles that
 @Composable
 fun SettingsCategoryContent(
     categoryId: String,
@@ -28,7 +26,7 @@ fun SettingsCategoryContent(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
-            .padding(bottom = 100.dp)  // space above floating bottom nav
+            .padding(bottom = 100.dp)
     ) {
         Spacer(Modifier.height(12.dp))
 

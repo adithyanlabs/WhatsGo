@@ -168,7 +168,6 @@ fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (
 
             if (message.text.isNotEmpty()) {
                 val density = LocalDensity.current
-                // gutter reserved on the last line: time + gap (+ dot for own messages)
                 val gutterDp = if (isMine) 58.dp else 44.dp
                 val gutterSp = with(density) { gutterDp.toSp() }
                 val lineSp = with(density) { 14.dp.toSp() }

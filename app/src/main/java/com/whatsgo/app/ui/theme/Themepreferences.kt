@@ -21,8 +21,6 @@ private val KEY_DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
 private val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
 
 class ThemePreferences(private val context: Context) {
-
-    // Use the shared DataStore instance. DO NOT create a new preferencesDataStore here!
     private val ds: DataStore<Preferences> = context.appSettingsDataStore
 
     val settingsFlow: Flow<ThemeSettings> = ds.data.map { prefs ->

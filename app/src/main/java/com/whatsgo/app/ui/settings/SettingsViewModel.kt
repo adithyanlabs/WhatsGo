@@ -1,4 +1,3 @@
-// ui/settings/SettingsViewModel.kt
 package com.whatsgo.app.ui.settings
 
 import android.app.Application

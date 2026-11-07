@@ -18,7 +18,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-// Pure black & white / grayscale. No hue anywhere.
 private val LightColors = lightColorScheme(
     primary = Color(0xFF000000),
     onPrimary = Color(0xFFFFFFFF),
@@ -98,8 +97,6 @@ fun ChatAppTheme(
         DarkModeOption.DARK -> true
     }
 
-    // Dynamic (Material You) follows system when enabled + supported.
-    // Otherwise fall back to B&W grayscale.
     val supportsDynamic = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val useDynamic = settings.dynamicColorEnabled && supportsDynamic
 

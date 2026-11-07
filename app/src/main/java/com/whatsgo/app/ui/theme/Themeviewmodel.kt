@@ -12,7 +12,6 @@ class ThemeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = ThemePreferences(application)
 
-    // This will reactively update whenever SettingsViewModel writes to the DataStore
     val settings: StateFlow<ThemeSettings> = prefs.settingsFlow.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),

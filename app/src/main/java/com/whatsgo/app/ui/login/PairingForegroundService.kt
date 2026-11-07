@@ -88,7 +88,6 @@ class PairingForegroundService : Service() {
     private fun copyCode() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Pairing code", code))
-        // Android 13+ shows its own "Copied" confirmation.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             Toast.makeText(this, "Code copied", Toast.LENGTH_SHORT).show()
         }
@@ -127,7 +126,7 @@ class PairingForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_chat) // swap for your own monochrome icon
+            .setSmallIcon(android.R.drawable.stat_notify_chat)
             .setContentTitle("WhatsApp pairing code")
             .setContentText(code)
             .setStyle(
