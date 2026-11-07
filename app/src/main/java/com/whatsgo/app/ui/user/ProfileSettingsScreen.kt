@@ -51,7 +51,6 @@ fun ProfileSettingsScreen(
         )
     }
 
-    // ✅ Just the content — no Scaffold wrapper
     Column(
         modifier = Modifier
             .fillMaxSize()

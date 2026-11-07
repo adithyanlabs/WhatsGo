@@ -1,4 +1,3 @@
-// ui/user/ProfileViewModel.kt — wire session events + pass db instead of context alone
 package com.whatsgo.app.ui.user
 
 import android.app.Application

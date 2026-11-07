@@ -87,7 +87,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         Text(
-            "WhatsGo v2.4.1",
+            "WhatsGo v0.1.0-alpha",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.align(Alignment.CenterHorizontally)
