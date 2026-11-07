@@ -45,7 +45,6 @@ class UpdatesViewModel(app: Application) : AndroidViewModel(app) {
     fun downloadStatus(status: StatusEntity) {
         session.downloadStatusMedia(status)
     }
-
     fun deleteStatus(status: StatusEntity) {
         session.deleteStatus(status)
     }

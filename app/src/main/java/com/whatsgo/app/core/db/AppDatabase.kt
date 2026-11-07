@@ -13,7 +13,8 @@ import androidx.room.RoomDatabase
         StatusEntity::class,
         StatusViewerEntity::class
     ],
-    version = 1
+    version = 1,
+    exportSchema = false
 )
 
 abstract class AppDatabase : RoomDatabase() {

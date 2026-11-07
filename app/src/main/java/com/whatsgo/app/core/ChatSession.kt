@@ -514,7 +514,6 @@ class ChatSession(dbPath: String, context: Context) {
         } catch (e: Exception) { false }
     }
 
-
     fun observeStatuses(): Flow<List<StatusEntity>> = db.statusDao().observeAll()
 
     fun sendTextStatus(text: String, backgroundColor: Long): Boolean {

@@ -17,3 +17,7 @@ Thumbs.db
 app/libs/*.aar
 app/libs/*.jar
 *.a
+
+*.jks
+*.keystore
+keystore.properties
