@@ -40,7 +40,8 @@ interface ContactDao {
     @Query("""
     INSERT INTO contacts (jid, name, avatarPath, avatarUpdatedAt)
     VALUES (:jid, :name, NULL, 0)
-    ON CONFLICT(jid) DO NOTHING
+    ON CONFLICT(jid) DO UPDATE SET name = excluded.name
+    WHERE contacts.name = ''
 """)
     suspend fun insertNameIfAbsent(jid: String, name: String)
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	wa "go.mau.fi/whatsmeow"
@@ -45,21 +46,45 @@ func (c *Client) FetchOwnProfilePictureURL() (string, error) {
 }
 
 func (c *Client) GetContactName(jid string) string {
-	parsed, err := types.ParseJID(jid)
+	j, err := types.ParseJID(jid)
 	if err != nil {
 		return ""
 	}
-	contact, err := c.inner.Store.Contacts.GetContact(context.Background(), parsed)
-	if err != nil || !contact.Found {
+	info, err := c.inner.Store.Contacts.GetContact(context.Background(), j)
+	if err != nil {
 		return ""
 	}
-	if contact.FullName != "" {
-		return contact.FullName
+	if info.FullName != "" {
+		return info.FullName
 	}
-	if contact.FirstName != "" {
-		return contact.FirstName
+	if info.FirstName != "" {
+		return info.FirstName
 	}
-	return contact.PushName
+	return info.PushName
+}
+
+func (c *Client) GetSavedContactsJSON() (string, error) {
+	all, err := c.inner.Store.Contacts.GetAllContacts(context.Background())
+	if err != nil {
+		return "", err
+	}
+	type row struct {
+		Jid  string `json:"jid"`
+		Name string `json:"name"`
+	}
+	out := make([]row, 0, len(all))
+	for jid, info := range all {
+		name := info.FullName
+		if name == "" {
+			name = info.FirstName
+		}
+		if name == "" {
+			continue // skip push-name-only entries
+		}
+		out = append(out, row{jid.String(), name})
+	}
+	b, err := json.Marshal(out)
+	return string(b), err
 }
 
 func (c *Client) GetGroupName(jid string) string {

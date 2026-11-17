@@ -94,7 +94,7 @@ class ChatSession(dbPath: String, context: Context) {
     private val ops = Channel<Op>(Channel.UNLIMITED)
     private val checkedGroups = HashSet<String>()
     private val avatarRefreshQueue = Channel<String>(Channel.UNLIMITED)
-    private val avatarQueued = HashSet<String>()
+    private val avatarQueued: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val prefs = appContext.getSharedPreferences("whatsgo_sync", Context.MODE_PRIVATE)
 
     private val fetchStarted = AtomicBoolean(false)
@@ -126,6 +126,10 @@ class ChatSession(dbPath: String, context: Context) {
 
         override fun onOfflineSyncCompleted(count: Long) {
             ops.trySend(Op.OfflineDone)
+        }
+
+        override fun onContactName(jid: String, name: String) {
+            scope.launch { db.contactDao().upsertName(jid, name) } // saved name wins
         }
 
         override fun onMessage(
@@ -296,7 +300,6 @@ class ChatSession(dbPath: String, context: Context) {
             for (jid in avatarRefreshQueue) {
                 avatarQueued.remove(jid)
                 if (jid.isBlank() ||
-                    jid.endsWith("@g.us") ||
                     jid.endsWith("@broadcast") ||
                     jid.endsWith("@newsletter")
                 ) continue
@@ -372,9 +375,7 @@ class ChatSession(dbPath: String, context: Context) {
             )
         )
         if (!s.fromMe && s.senderName.isNotBlank()) {
-            runCatching {
-                db.contactDao().upsert(ContactEntity(jid = s.senderJid, name = s.senderName))
-            }
+            runCatching { db.contactDao().insertNameIfAbsent(s.senderJid, s.senderName) }
         }
     }
 
@@ -387,7 +388,6 @@ class ChatSession(dbPath: String, context: Context) {
                 db.messageDao().markAllSentRead(h.chatJid)
             }
         }
-        list.forEach { enqueueAvatar(it.chatJid) }
         list.clear()
     }
 
@@ -401,6 +401,7 @@ class ChatSession(dbPath: String, context: Context) {
 
     private suspend fun saveNames(batch: List<Incoming>) {
         val names = HashMap<String, String>()
+        val pushNames = HashMap<String, String>()
         val groupFlags = HashMap<String, Boolean>()
         val chatJids = batch.map { it.chatJid }.toHashSet()
         for (m in batch) {
@@ -415,15 +416,29 @@ class ChatSession(dbPath: String, context: Context) {
                         if (!g.isNullOrBlank()) names[m.chatJid] = g
                     }
                 }
-                if (!m.fromMe && m.pushName.isNotBlank()) names[m.senderJid] = m.pushName
+                if (!m.fromMe && m.pushName.isNotBlank()) pushNames[m.senderJid] = m.pushName
             } else if (!m.fromMe && m.pushName.isNotBlank()) {
-                names[m.chatJid] = m.pushName
+                pushNames[m.chatJid] = m.pushName
             }
         }
         db.withTransaction {
             names.forEach { (jid, name) -> db.contactDao().upsertName(jid, name) }
+            pushNames.forEach { (jid, name) -> db.contactDao().insertNameIfAbsent(jid, name) }
         }
-        names.keys.filter { it in chatJids }.forEach { enqueueAvatar(it) }
+    }
+
+    private suspend fun syncSavedContacts() {
+        runCatching {
+            val json = withContext(Dispatchers.IO) { client.getSavedContactsJSON() }
+            val arr = org.json.JSONArray(json)
+            db.withTransaction {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val jid = o.optString("jid"); val name = o.optString("name")
+                    if (jid.isNotBlank() && name.isNotBlank()) db.contactDao().upsertName(jid, name)
+                }
+            }
+        }.onFailure { Log.e("ChatSession", "syncSavedContacts failed: ${it.message}") }
     }
 
     fun messagesForChat(chatJid: String) = db.messageDao().messagesForChat(chatJid)
@@ -742,11 +757,13 @@ class ChatSession(dbPath: String, context: Context) {
     private fun enqueueAllAvatars() {
         scope.launch {
             db.messageDao().allChatJids().first().forEach { enqueueAvatar(it) }
+            db.contactDao().observeAll().first()
+                .filter { it.jid.endsWith("@g.us") }
+                .forEach { enqueueAvatar(it.jid) }
         }
     }
     private fun enqueueAvatar(jid: String) {
         if (jid.isBlank()) return
-        if (jid.endsWith("@g.us")) return
         if (jid.endsWith("@broadcast")) return
         if (jid.endsWith("@newsletter")) return
         if (!avatarQueued.add(jid)) return
@@ -757,7 +774,7 @@ class ChatSession(dbPath: String, context: Context) {
         scope.launch {
             delay(3000)
             prefetchProfile()
-            enqueueAllAvatars()
+            syncSavedContacts()
             syncGroupsWithRetry()
         }
     }
@@ -780,7 +797,6 @@ class ChatSession(dbPath: String, context: Context) {
                         }
                     }
                 }
-                ids.forEach { enqueueAvatar(it) }
                 prefs.edit().putLong("groups_synced_at", System.currentTimeMillis()).apply()
                 Log.i("ChatSession", "Synced ${ids.size} groups")
             }.onFailure {

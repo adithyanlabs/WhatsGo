@@ -41,7 +41,8 @@ fun ChatList(
     chats: List<ChatItem>,
     listState: LazyListState,
     bottomPadding: Dp,
-    onChatClick: (ChatItem) -> Unit
+    onChatClick: (ChatItem) -> Unit,
+    onAvatarNeeded: (String) -> Unit = {}
 ) {
     if (chats.isEmpty()) {
         Box(
@@ -55,6 +56,7 @@ fun ChatList(
             )
         }
     } else {
+        VisibleAvatarLoader(listState, chats, onAvatarNeeded)
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -74,6 +76,7 @@ fun ChatList(
         }
     }
 }
+
 @Composable
 fun ChatRow(
     chat: ChatItem,

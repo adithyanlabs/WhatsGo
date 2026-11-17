@@ -85,11 +85,10 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 if (isGroup) session.groupName(jid) else session.contactName(jid)
             }.getOrNull()
-        }
-        val name = fetched?.takeIf { it.isNotBlank() } ?: jid.substringBefore("@")
-        db.contactDao().upsertName(jid, name)
-        session.requestAvatarRefresh(jid)
-        return name
+        }?.takeIf { it.isNotBlank() }
+
+        if (fetched != null) db.contactDao().insertNameIfAbsent(jid, fetched)
+        return fetched ?: jid.substringBefore("@")   // show the number, but don't store it
     }
 
     private fun formatTime(epochSeconds: Long): String {

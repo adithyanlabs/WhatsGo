@@ -28,6 +28,15 @@ func (c *Client) processEvent(evt interface{}) {
     case *events.OfflineSyncCompleted:
     	c.cb.OnOfflineSyncCompleted(int64(e.Count))
 
+    case *events.Contact:
+    	name := e.Action.GetFullName()
+    	if name == "" {
+    		name = e.Action.GetFirstName()
+    	}
+    	if name != "" {
+    		c.cb.OnContactName(e.JID.ToNonAD().String(), name)
+    	}
+
 	case *events.PushNameSetting:
 		name := c.inner.Store.PushName
 		c.log.Infof("own push name updated: %s", name)

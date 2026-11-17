@@ -35,7 +35,8 @@ import com.whatsgo.app.ui.updates.UpdatesViewModel
 import kotlinx.coroutines.launch
 import com.whatsgo.app.ui.settings.components.LogoutDialog
 
-/** Space the lists keep clear at the bottom so the floating nav never covers the last row. */
+
+
 private val FloatingNavClearance = 110.dp
 
 @SuppressLint("RestrictedApi")
@@ -259,19 +260,15 @@ fun ChatAppRoot() {
                                                 chats = directChats,
                                                 listState = allChatsListState,
                                                 bottomPadding = FloatingNavClearance,
-                                                onChatClick = {
-                                                    chatListViewModel.markRead(it.id)
-                                                    selectedChat = it
-                                                }
+                                                onChatClick = { chatListViewModel.markRead(it.id); selectedChat = it },
+                                                onAvatarNeeded = { session.requestAvatarRefresh(it) }
                                             )
                                             TopTab.GROUPS -> ChatList(
                                                 chats = groupChats,
                                                 listState = groupsListState,
                                                 bottomPadding = FloatingNavClearance,
-                                                onChatClick = {
-                                                    chatListViewModel.markRead(it.id)
-                                                    selectedChat = it
-                                                }
+                                                onChatClick = { chatListViewModel.markRead(it.id); selectedChat = it },
+                                                onAvatarNeeded = { session.requestAvatarRefresh(it) }
                                             )
                                             else -> EmptyTabPlaceholder(tabs[innerPage])
                                         }
