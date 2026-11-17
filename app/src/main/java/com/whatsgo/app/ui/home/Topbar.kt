@@ -9,9 +9,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusEvent
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,14 +73,14 @@ fun ChatTopBar(
                             },
                             onClick = {
                                 onToggleTheme()
-                               // onMenuExpandedChange(false)
+                                // onMenuExpandedChange(false)
                             }
                         )
                     }
                 }
             }
 
-            var query by remember { mutableStateOf("") }
+            var query by rememberSaveable { mutableStateOf("") }
             val searchBarShape by animateDpAsState(
                 targetValue = if (searchActive) 12.dp else 28.dp,
                 animationSpec = tween(250),
@@ -98,7 +99,7 @@ fun ChatTopBar(
                         exit = fadeOut()
                     ) {
                         IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Clear")
+                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
                         }
                     }
                 },
@@ -115,11 +116,8 @@ fun ChatTopBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 8.dp)
-                    .onFocusChanged(onSearchActiveChange)
+                    .onFocusChanged { onSearchActiveChange(it.isFocused) }
             )
         }
     }
 }
-
-private fun Modifier.onFocusChanged(callback: (Boolean) -> Unit): Modifier =
-    this.then(Modifier.onFocusEvent { state -> callback(state.isFocused) })

@@ -89,11 +89,13 @@ fun ChatRow(
     )
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val imageRequest = remember(chat.avatarPath, context) {
+    // 52 is dp, Coil's size() takes pixels: convert so avatars are sharp on high-density screens
+    val avatarPx = with(androidx.compose.ui.platform.LocalDensity.current) { 52.dp.roundToPx() }
+    val imageRequest = remember(chat.avatarPath, context, avatarPx) {
         chat.avatarPath?.let { path ->
             coil3.request.ImageRequest.Builder(context)
                 .data(java.io.File(path))
-                .size(52, 52)
+                .size(avatarPx, avatarPx)
                 .crossfade(false)
                 .build()
         }
@@ -109,6 +111,7 @@ fun ChatRow(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
+                onClickLabel = "Open chat with ${chat.name}",
                 onClick = onClick
             )
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -210,7 +213,7 @@ private fun LetterAvatar(name: String) {
     ) {
         Text(
             text = name.firstOrNull()?.uppercase() ?: "?",
-            color = MaterialTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
             fontWeight = FontWeight.Bold,
             fontSize = 18.sp
         )

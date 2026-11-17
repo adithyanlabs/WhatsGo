@@ -35,6 +35,9 @@ import com.whatsgo.app.ui.updates.UpdatesViewModel
 import kotlinx.coroutines.launch
 import com.whatsgo.app.ui.settings.components.LogoutDialog
 
+/** Space the lists keep clear at the bottom so the floating nav never covers the last row. */
+private val FloatingNavClearance = 110.dp
+
 @SuppressLint("RestrictedApi")
 @Composable
 fun ChatAppRoot() {
@@ -193,7 +196,7 @@ fun ChatAppRoot() {
                     ) { page ->
                         val dest = BottomDest.entries[page]
                         Column(Modifier.fillMaxSize()) {
-                        when {
+                            when {
                                 dest == BottomDest.SETTINGS && settingsCategory != null ->
                                     SettingsCategoryTopBar(
                                         title = SettingsRegistry
@@ -255,7 +258,7 @@ fun ChatAppRoot() {
                                             TopTab.ALL -> ChatList(
                                                 chats = directChats,
                                                 listState = allChatsListState,
-                                                bottomPadding = 110.dp,
+                                                bottomPadding = FloatingNavClearance,
                                                 onChatClick = {
                                                     chatListViewModel.markRead(it.id)
                                                     selectedChat = it
@@ -264,7 +267,7 @@ fun ChatAppRoot() {
                                             TopTab.GROUPS -> ChatList(
                                                 chats = groupChats,
                                                 listState = groupsListState,
-                                                bottomPadding = 110.dp,
+                                                bottomPadding = FloatingNavClearance,
                                                 onChatClick = {
                                                     chatListViewModel.markRead(it.id)
                                                     selectedChat = it
@@ -334,7 +337,8 @@ fun ChatAppRoot() {
                         Box(
                             Modifier
                                 .fillMaxSize()
-                                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f)),
+                                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+                                .pointerInput(Unit) {}, // swallow touches while logging out
                             contentAlignment = Alignment.Center
                         ) {
                             androidx.compose.material3.CircularProgressIndicator()

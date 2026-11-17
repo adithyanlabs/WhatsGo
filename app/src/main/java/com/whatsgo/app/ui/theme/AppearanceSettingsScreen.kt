@@ -1,7 +1,8 @@
 package com.whatsgo.app.ui.theme
 
 import android.os.Build
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +14,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -52,9 +54,12 @@ fun AppearanceSettingsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = supportsDynamicColor) {
-                        viewModel.setDynamicColorEnabled(!settings.dynamicColorEnabled)
-                    }
+                    .toggleable(
+                        value = isDynamicEnabled,
+                        enabled = supportsDynamicColor,
+                        role = Role.Switch,
+                        onValueChange = { viewModel.setDynamicColorEnabled(it) }
+                    )
                     .padding(vertical = 16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -83,12 +88,12 @@ fun AppearanceSettingsScreen(
                 }
                 Switch(
                     checked = isDynamicEnabled,
-                    onCheckedChange = { viewModel.setDynamicColorEnabled(it) },
+                    onCheckedChange = null, // the whole row is the toggle target
                     enabled = supportsDynamicColor
                 )
             }
 
-            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+            HorizontalDivider()
 
             Text(
                 text = "Theme",
@@ -113,7 +118,11 @@ fun AppearanceSettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.setDarkModeOption(option.mode) }
+                        .selectable(
+                            selected = settings.darkModeOption == option.mode,
+                            role = Role.RadioButton,
+                            onClick = { viewModel.setDarkModeOption(option.mode) }
+                        )
                         .padding(vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -131,7 +140,7 @@ fun AppearanceSettingsScreen(
                     )
                     RadioButton(
                         selected = settings.darkModeOption == option.mode,
-                        onClick = { viewModel.setDarkModeOption(option.mode) }
+                        onClick = null // the whole row is the select target
                     )
                 }
             }

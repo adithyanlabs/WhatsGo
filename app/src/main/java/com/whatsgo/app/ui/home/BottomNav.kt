@@ -1,34 +1,37 @@
 package com.whatsgo.app.ui.home
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.whatsgo.app.ui.home.BottomDest
-import androidx.compose.animation.animateColorAsState // already there
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.dp
+
 @Composable
 fun FloatingBottomNav(
     selected: BottomDest,
@@ -49,16 +52,16 @@ fun FloatingBottomNav(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            BottomDest.values().forEach { dest ->
+            BottomDest.entries.forEach { dest ->
                 val isSelected = dest == selected
-                val bgColor = animateColorAsState(
+                val bgColor by animateColorAsState(
                     targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
                     animationSpec = tween(220), label = "pill-bg"
-                ).value
-                val contentColor = animateColorAsState(
+                )
+                val contentColor by animateColorAsState(
                     targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                     animationSpec = tween(220), label = "pill-content"
-                ).value
+                )
                 val iconScale by animateFloatAsState(
                     targetValue = if (isSelected) 1.2f else 1f,
                     animationSpec = spring(
@@ -80,10 +83,16 @@ fun FloatingBottomNav(
                     modifier = Modifier
                         .clip(RoundedCornerShape(24.dp))
                         .background(bgColor)
-                        .clickable(
+                        // selectable (not clickable) so TalkBack announces "Tab, selected"
+                        .selectable(
+                            selected = isSelected,
+                            role = Role.Tab,
                             interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onSelect(dest) }
+                            indication = null,
+                            onClick = { onSelect(dest) }
+                        )
+                        // 48dp minimum touch target (was 46dp)
+                        .defaultMinSize(minHeight = 48.dp)
                         .padding(horizontal = hPadding, vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {

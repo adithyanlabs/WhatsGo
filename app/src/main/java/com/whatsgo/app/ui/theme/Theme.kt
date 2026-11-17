@@ -3,6 +3,7 @@ package com.whatsgo.app.ui.theme
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -37,6 +38,8 @@ private val LightColors = lightColorScheme(
     onSurface = Color(0xFF000000),
     surfaceVariant = Color(0xFFE8E8E8),
     onSurfaceVariant = Color(0xFF444444),
+    surfaceDim = Color(0xFFDADADA),
+    surfaceBright = Color(0xFFFFFFFF),
     surfaceContainerLowest = Color(0xFFFFFFFF),
     surfaceContainerLow = Color(0xFFF7F7F7),
     surfaceContainer = Color(0xFFF0F0F0),
@@ -44,8 +47,10 @@ private val LightColors = lightColorScheme(
     surfaceContainerHighest = Color(0xFFE2E2E2),
     outline = Color(0xFF737373),
     outlineVariant = Color(0xFFC4C4C4),
-    error = Color(0xFF2B2B2B),
+    error = Color(0xFFB3261E),
     onError = Color(0xFFFFFFFF),
+    errorContainer = Color(0xFFF9DEDC),
+    onErrorContainer = Color(0xFF410E0B),
     inverseSurface = Color(0xFF1A1A1A),
     inverseOnSurface = Color(0xFFF2F2F2),
     inversePrimary = Color(0xFFFFFFFF)
@@ -70,6 +75,8 @@ private val DarkColors = darkColorScheme(
     onSurface = Color(0xFFFFFFFF),
     surfaceVariant = Color(0xFF2A2A2A),
     onSurfaceVariant = Color(0xFFBDBDBD),
+    surfaceDim = Color(0xFF000000),
+    surfaceBright = Color(0xFF2C2C2C),
     surfaceContainerLowest = Color(0xFF000000),
     surfaceContainerLow = Color(0xFF0F0F0F),
     surfaceContainer = Color(0xFF161616),
@@ -77,8 +84,10 @@ private val DarkColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF292929),
     outline = Color(0xFF8C8C8C),
     outlineVariant = Color(0xFF3A3A3A),
-    error = Color(0xFFE0E0E0),
-    onError = Color(0xFF000000),
+    error = Color(0xFFF2B8B5),
+    onError = Color(0xFF601410),
+    errorContainer = Color(0xFF8C1D18),
+    onErrorContainer = Color(0xFFF9DEDC),
     inverseSurface = Color(0xFFE8E8E8),
     inverseOnSurface = Color(0xFF1A1A1A),
     inversePrimary = Color(0xFF000000)
@@ -113,13 +122,16 @@ fun ChatAppTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !darkTheme
+            controller.isAppearanceLightNavigationBars = !darkTheme
         }
     }
 
     MaterialTheme(
         colorScheme = colors,
         typography = Typography(),
+        shapes = Shapes(),
         content = content
     )
 }

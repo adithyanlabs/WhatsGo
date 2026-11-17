@@ -6,8 +6,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.whatsgo.app.ui.chat.ConversationScreen
@@ -30,7 +33,11 @@ internal fun ProfileSettingsOverlay(
         ) + fadeOut(tween(350)),
         modifier = Modifier.fillMaxSize()
     ) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             SettingsCategoryTopBar(title = "Profile", onBack = onDismiss)
             ProfileSettingsScreen(onBack = onDismiss)
         }
@@ -55,14 +62,20 @@ internal fun ConversationOverlay(
         ) + fadeOut(tween(120)),
         modifier = Modifier.fillMaxSize()
     ) {
-        if (chat != null) {
-            ConversationScreen(
-                chatJid = chat.id,
-                contactName = chat.name,
-                contactStatus = if (chat.isOnline) "online" else "last seen recently",
-                contactAvatarPath = chat.avatarPath,
-                onBack = onBack
-            )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            if (chat != null) {
+                ConversationScreen(
+                    chatJid = chat.id,
+                    contactName = chat.name,
+                    contactStatus = if (chat.isOnline) "online" else "last seen recently",
+                    contactAvatarPath = chat.avatarPath,
+                    onBack = onBack
+                )
+            }
         }
     }
 }
