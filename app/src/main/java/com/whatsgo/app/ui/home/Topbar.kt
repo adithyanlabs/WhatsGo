@@ -89,7 +89,7 @@ fun ChatTopBar(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search chats, contacts, messages") },
+                placeholder = { Text("Search") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     AnimatedVisibility(

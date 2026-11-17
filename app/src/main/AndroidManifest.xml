@@ -20,7 +20,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Whatsgo">
         <service
-            android:name=".ui.login.PairingForegroundService"
+            android:name=".core.HistorySyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <activity

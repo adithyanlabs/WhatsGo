@@ -62,4 +62,15 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
     WHERE chatJid = :chatJid AND fromMe = 0 AND isRead = 0
 """)
     suspend fun getUnreadIncoming(chatJid: String): List<UnreadMessageRef>
+
+    @Query("""
+    UPDATE messages SET isRead = 1
+    WHERE chatJid = :chatJid AND fromMe = 0 AND isRead = 0
+    AND messageId NOT IN (
+        SELECT messageId FROM messages
+        WHERE chatJid = :chatJid AND fromMe = 0
+        ORDER BY timestamp DESC LIMIT :unread
+    )
+""")
+    suspend fun applyHistoryUnread(chatJid: String, unread: Int)
 }

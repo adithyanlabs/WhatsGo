@@ -36,4 +36,11 @@ interface ContactDao {
 
     @Query("UPDATE contacts SET avatarPath = NULL, avatarUpdatedAt = 0 WHERE jid = :jid")
     suspend fun clearAvatar(jid: String)
+
+    @Query("""
+    INSERT INTO contacts (jid, name, avatarPath, avatarUpdatedAt)
+    VALUES (:jid, :name, NULL, 0)
+    ON CONFLICT(jid) DO NOTHING
+""")
+    suspend fun insertNameIfAbsent(jid: String, name: String)
 }

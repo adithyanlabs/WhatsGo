@@ -10,6 +10,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.whatsgo.app.core.ChatSession
+import com.whatsgo.app.core.HistorySyncService
 import com.whatsgo.app.core.LoginEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -67,7 +69,6 @@ enum class PairingStep {
     ENTER_PHONE, SHOW_CODE
 }
 
-/** Map raw whatsmeow error strings to messages a user can act on. */
 private fun friendlyPairingError(raw: String): String {
     val msg = raw.lowercase()
     return when {
@@ -112,7 +113,7 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
                 generatedCode = event.code
                 isConnecting = false
                 step = PairingStep.SHOW_CODE
-                PairingForegroundService.start(context, event.code)
+                HistorySyncService.setPairingCode(event.code)
             }
             is LoginEvent.Error -> {
                 isConnecting = false
@@ -238,6 +239,7 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
 
             Button(
                 onClick = {
+                    runCatching { HistorySyncService.start(context) }
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     errorMessage = null
                     isConnecting = true
@@ -302,7 +304,7 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 28.dp, horizontal = 16.dp),
-                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
@@ -336,7 +338,7 @@ fun PairingCodeSection(session: ChatSession, event: LoginEvent) {
                 onClick = {
                     phoneNumber = ""
                     copied = false
-                    PairingForegroundService.stop(context)
+                    HistorySyncService.setPairingCode(null)
                     step = PairingStep.ENTER_PHONE
                 }
             ) {

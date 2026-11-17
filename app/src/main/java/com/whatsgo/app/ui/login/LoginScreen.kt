@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.whatsgo.app.core.LoginEvent
 import com.whatsgo.app.core.SessionHolder
-
+import com.whatsgo.app.core.HistorySyncService
 enum class LoginMethod {
     QR_CODE, PAIRING_CODE
 }
@@ -84,6 +84,9 @@ fun LoginScreen(
     }
 
     val session = remember { SessionHolder.get(context) }
+    LaunchedEffect(Unit) {
+        runCatching { HistorySyncService.start(context) }
+    }
     val loginEvent by session.events.collectAsState()
 
     LaunchedEffect(loginEvent) {

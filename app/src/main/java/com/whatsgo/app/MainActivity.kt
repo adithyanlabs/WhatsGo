@@ -22,6 +22,7 @@ import com.whatsgo.app.ui.login.LoginScreen
 import com.whatsgo.app.ui.theme.ChatAppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import com.whatsgo.app.core.HistorySyncService
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

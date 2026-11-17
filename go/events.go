@@ -2,20 +2,31 @@ package engine
 
 import (
 	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
 func (c *Client) processEvent(evt interface{}) {
 	switch e := evt.(type) {
 	case *events.PairSuccess:
-		c.cb.OnConnected()
+            c.log.Infof("pair success, waiting for 515 reconnect + Connected")
 
 	case *events.PairError:
 		c.cb.OnError(e.Error.Error())
 
-	case *events.Connected:
-		c.cb.OnConnected()
+    case *events.Connected:
+        c.cb.OnConnected()
+
+	case *events.Message:
+    	c.dispatchMessage(e)
+
+    case *events.HistorySync:
+    	c.handleHistorySync(e)
+
+    case *events.OfflineSyncPreview:
+    	c.cb.OnOfflineSyncPreview(int64(e.Total), int64(e.Messages), int64(e.Notifications), int64(e.Receipts))
+
+    case *events.OfflineSyncCompleted:
+    	c.cb.OnOfflineSyncCompleted(int64(e.Count))
 
 	case *events.PushNameSetting:
 		name := c.inner.Store.PushName
@@ -58,169 +69,14 @@ func (c *Client) processEvent(evt interface{}) {
 				c.cb.OnMessageStatus(msgID, status)
 			}
 		}
-
-	case *events.Message:
-		if e.Info.Chat.User == "status" && e.Info.Chat.Server == types.BroadcastServer {
-			c.handleStatusMessage(e)
-			return
-		}
-
-		img := e.Message.GetImageMessage()
-		vid := e.Message.GetVideoMessage()
-
-		if img != nil || vid != nil {
-			var mediaType, caption, mimetype, url, directPath string
-			var mediaKey, fileEncSHA256, fileSHA256, thumbnail []byte
-			var fileLength int64
-			var ctxInfo *waE2E.ContextInfo
-
-			if img != nil {
-				mediaType = "image"
-				caption = img.GetCaption()
-				mimetype = img.GetMimetype()
-				url = img.GetURL()
-				directPath = img.GetDirectPath()
-				mediaKey = img.GetMediaKey()
-				fileEncSHA256 = img.GetFileEncSHA256()
-				fileSHA256 = img.GetFileSHA256()
-				fileLength = int64(img.GetFileLength())
-				thumbnail = img.GetJPEGThumbnail()
-				ctxInfo = img.GetContextInfo()
-			} else {
-				mediaType = "video"
-				caption = vid.GetCaption()
-				mimetype = vid.GetMimetype()
-				url = vid.GetURL()
-				directPath = vid.GetDirectPath()
-				mediaKey = vid.GetMediaKey()
-				fileEncSHA256 = vid.GetFileEncSHA256()
-				fileSHA256 = vid.GetFileSHA256()
-				fileLength = int64(vid.GetFileLength())
-				thumbnail = vid.GetJPEGThumbnail()
-				ctxInfo = vid.GetContextInfo()
-			}
-
-			quotedID, quotedText, quotedSender := "", "", ""
-			if ctxInfo != nil {
-				quotedID = ctxInfo.GetStanzaID()
-				quotedSender = ctxInfo.GetParticipant()
-				if qm := ctxInfo.GetQuotedMessage(); qm != nil {
-					quotedText = qm.GetConversation()
-				}
-			}
-			if thumbnail == nil { thumbnail = []byte{} }
-			if mediaKey == nil { mediaKey = []byte{} }
-			if fileEncSHA256 == nil { fileEncSHA256 = []byte{} }
-			if fileSHA256 == nil { fileSHA256 = []byte{} }
-
-			c.cb.OnMediaMessage(
-				e.Info.Chat.String(), e.Info.Sender.String(), e.Info.ID,
-				mediaType, caption, e.Info.Timestamp.Unix(), e.Info.IsFromMe,
-				url, directPath, mediaKey, fileEncSHA256, fileSHA256, fileLength, mimetype, thumbnail,
-				quotedID, quotedText, quotedSender, e.Info.PushName,
-			)
-			return
-		}
-
-		text := e.Message.GetConversation()
-		quotedID := ""
-		quotedText := ""
-		quotedSender := ""
-
-		if ext := e.Message.GetExtendedTextMessage(); ext != nil {
-			if text == "" {
-				text = ext.GetText()
-			}
-			if ctx := ext.GetContextInfo(); ctx != nil {
-				quotedID = ctx.GetStanzaID()
-				quotedSender = ctx.GetParticipant()
-				if qm := ctx.GetQuotedMessage(); qm != nil {
-					quotedText = qm.GetConversation()
-				}
-			}
-		}
-
-		if text == "" {
-			return
-		}
-		c.cb.OnMessage(
-			e.Info.Chat.String(),
-			e.Info.Sender.String(),
-			e.Info.ID,
-			text,
-			e.Info.Timestamp.Unix(),
-			e.Info.IsFromMe,
-			quotedID,
-			quotedText,
-			e.Info.PushName,
-			quotedSender,
-		)
 	}
 }
 
-func (c *Client) handleStatusMessage(e *events.Message) {
-	img := e.Message.GetImageMessage()
-	vid := e.Message.GetVideoMessage()
-	ext := e.Message.GetExtendedTextMessage()
-
-	var mediaType, text, mimetype, url, directPath string
-	var mediaKey, fileEncSHA256, fileSHA256, thumbnail []byte
-	var fileLength int64
-	var bgColor int64 = 0xFF000000
-
-	if img != nil {
-		mediaType = "image"
-		text = img.GetCaption()
-		mimetype = img.GetMimetype()
-		url = img.GetURL()
-		directPath = img.GetDirectPath()
-		mediaKey = img.GetMediaKey()
-		fileEncSHA256 = img.GetFileEncSHA256()
-		fileSHA256 = img.GetFileSHA256()
-		fileLength = int64(img.GetFileLength())
-		thumbnail = img.GetJPEGThumbnail()
-	} else if vid != nil {
-		mediaType = "video"
-		text = vid.GetCaption()
-		mimetype = vid.GetMimetype()
-		url = vid.GetURL()
-		directPath = vid.GetDirectPath()
-		mediaKey = vid.GetMediaKey()
-		fileEncSHA256 = vid.GetFileEncSHA256()
-		fileSHA256 = vid.GetFileSHA256()
-		fileLength = int64(vid.GetFileLength())
-		thumbnail = vid.GetJPEGThumbnail()
-	} else if ext != nil {
-		mediaType = "text"
-		text = ext.GetText()
-		bgColor = int64(ext.GetBackgroundArgb())
-	} else if conv := e.Message.GetConversation(); conv != "" {
-		mediaType = "text"
-		text = conv
-	} else {
-		return
-	}
-
-	if mediaKey == nil { mediaKey = []byte{} }
-	if fileEncSHA256 == nil { fileEncSHA256 = []byte{} }
-	if fileSHA256 == nil { fileSHA256 = []byte{} }
-	if thumbnail == nil { thumbnail = []byte{} }
-
-	c.cb.OnStatusMessage(
-		e.Info.ID,
-		e.Info.Sender.String(),
-		e.Info.PushName,
-		e.Info.Timestamp.Unix(),
-		e.Info.IsFromMe,
-		mediaType, text, bgColor,
-		url, directPath, mediaKey, fileEncSHA256, fileSHA256, fileLength, mimetype, thumbnail,
-	)
-}
 
 func (c *Client) handleEvent(evt interface{}) {
 	switch evt.(type) {
-	case *events.Message, *events.Receipt, *events.HistorySync:
-		c.queue <- func() { c.processEvent(evt) }
+	case *events.Message, *events.Receipt, *events.HistorySync, *events.OfflineSyncPreview, *events.OfflineSyncCompleted:
+    	c.queue <- func() { c.processEvent(evt) }
 	default:
 		defer func() {
 			if r := recover(); r != nil {

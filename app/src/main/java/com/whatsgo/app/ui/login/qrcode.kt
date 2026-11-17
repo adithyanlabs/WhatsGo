@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,6 +48,7 @@ import com.whatsgo.app.core.LoginEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.whatsgo.app.core.HistorySyncService
 
 private enum class QrState { IDLE, LOADING, READY, EXPIRED }
 
@@ -55,8 +57,10 @@ fun QrCodeSection(session: ChatSession, event: LoginEvent) {
     var qrState by remember { mutableStateOf(QrState.IDLE) }
     var qrPayload by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     fun generate() {
+        runCatching { HistorySyncService.start(context) }
         qrPayload = null
         qrState = QrState.LOADING
         scope.launch { withContext(Dispatchers.IO) { session.beginQrLogin() } }

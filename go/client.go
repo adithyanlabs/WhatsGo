@@ -25,6 +25,11 @@ type LoginCallback interface {
 
 	OnStatusMessage(statusID string, senderJID string, senderName string, timestamp int64, fromMe bool, mediaType string, text string, backgroundColor int64, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, thumbnail []byte)
 	OnStatusViewed(statusID string, viewerJID string)
+	OnHistoryContact(jid string, name string)
+    OnHistoryChat(chatJID string, name string, unreadCount int64)
+    OnHistorySync(syncType string, progress int64)
+    OnOfflineSyncPreview(total, messages, notifications, receipts int64)
+    OnOfflineSyncCompleted(count int64)
 }
 
 type Client struct {
