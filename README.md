@@ -1,32 +1,102 @@
 # WhatsGo
 
-WhatsGo is an open-source hybrid messaging application for Android. It pairs a native Kotlin & Jetpack Compose (Material 3) UI with a Go engine (`engine.aar`) running in the background via `gomobile`.
+**A native Android WhatsApp client powered by Go and whatsmeow.**
 
-[Download Latest Release APK](https://github.com/adithyanlabs/WhatsGo/releases)
+WhatsGo is an Android application built with Kotlin and Jetpack Compose, powered by a Go-based messaging engine using [whatsmeow](https://github.com/tulir/whatsmeow).
 
-## Features (v0.2.0-alpha)
+The project combines Go's performance and messaging capabilities with a modern Android interface built using Material 3.
 
-* **Messaging:** Real-time message sending and receiving.
-* **Groups:** Fetches and displays user groups.
-* **Material 3:** Support for Light and Dark themes.
-* **Profile:** Basic user profile screen.
+> **Status:** Alpha — actively under development. Expect bugs, incomplete features, and breaking changes.
 
-> **Note:** This project is currently in an early alpha stage. Expect bugs and incomplete features.
+## Features
+
+- **WhatsApp Integration** — Connect using the whatsmeow library.
+- **QR Code & Pairing** — Link your WhatsApp account.
+- **History Synchronization** — Synchronize chats and messages after pairing.
+- **Background Sync** — Handle synchronization through an Android foreground service.
+- **Native Android UI** — Built with Kotlin and Jetpack Compose.
+- **Material 3 Design** — Modern Android interface.
+- **Go Engine** — Messaging functionality powered by Go and gomobile.
+
+## Tech Stack
+
+| Component | Technology |
+|---|---|
+| Android | Kotlin |
+| UI | Jetpack Compose |
+| Design | Material 3 |
+| Messaging Engine | Go |
+| WhatsApp Library | whatsmeow |
+| Android-Go Integration | gomobile |
+| Database | SQLite |
+| Build System | Gradle |
+
+## Project Structure
+
+```text
+WhatsGo/
+├── app/                  # Android application
+│   ├── src/
+│   └── libs/             # Go Android library (AAR)
+├── native/               # Go messaging engine
+├── gradle/
+├── build.gradle.kts
+└── settings.gradle.kts
+```
 
 ## Getting Started
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/adithyanlabs/WhatsGo.git
-   ```
+### Requirements
 
-2. Open the project in Android Studio.
+- Android Studio
+- Android SDK
+- JDK compatible with the project Gradle configuration
+- Go
+- gomobile
 
-3. Build and run the app:
-   ```bash
-   ./gradlew assembleDebug
-   ```
+### Build
+
+Clone the repository:
+
+```bash
+git clone https://github.com/adithyanlabs/WhatsGo.git
+cd WhatsGo
+```
+
+Build the debug APK:
+
+```bash
+./gradlew assembleDebug
+```
+
+Build the release APK:
+
+```bash
+./gradlew clean assembleRelease
+```
+
+The release APK will be generated at:
+
+```text
+app/build/outputs/apk/release/app-release.apk
+```
+
+## Releases
+
+You can find available builds on the [GitHub Releases](https://github.com/adithyanlabs/WhatsGo/releases) page.
+
+WhatsGo is currently in alpha, so releases are intended primarily for testing.
+
+## Disclaimer
+
+WhatsGo is an independent, unofficial project and is not affiliated with, endorsed by, or associated with WhatsApp or Meta.
+
+This project uses [whatsmeow](https://github.com/tulir/whatsmeow), an unofficial WhatsApp Web API implementation.
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for details.
+See the [LICENSE](LICENSE) file for licensing information.
+
+---
+
+**Built with Go and Kotlin by [Adithyan](https://github.com/adithyanlabs).**
