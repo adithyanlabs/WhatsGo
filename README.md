@@ -4,7 +4,7 @@ WhatsGo is an open-source hybrid messaging application for Android. It pairs a n
 
 [Download Latest Release APK](https://github.com/adithyanlabs/WhatsGo/releases)
 
-## Features (v0.1.0-alpha)
+## Features (v0.2.0-alpha)
 
 * **Messaging:** Real-time message sending and receiving.
 * **Groups:** Fetches and displays user groups.
