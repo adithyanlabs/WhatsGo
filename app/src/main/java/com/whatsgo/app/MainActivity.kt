@@ -23,6 +23,10 @@ import com.whatsgo.app.ui.theme.ChatAppTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import com.whatsgo.app.core.HistorySyncService
+import android.content.Intent
+import com.whatsgo.app.core.update.UpdateDownloadService
+import com.whatsgo.app.core.update.Updater
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,5 +84,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleInstallIntent(intent)
+    }
+
+    private fun handleInstallIntent(i: Intent?) {
+        if (i?.action != UpdateDownloadService.ACTION_INSTALL) return
+        val path = i.getStringExtra(UpdateDownloadService.EXTRA_PATH) ?: return
+        i.action = null   // don't re-trigger on rotation
+        Updater.install(this, File(path))
     }
 }

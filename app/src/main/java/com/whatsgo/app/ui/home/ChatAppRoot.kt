@@ -34,7 +34,8 @@ import com.whatsgo.app.ui.updates.UpdatesScreen
 import com.whatsgo.app.ui.updates.UpdatesViewModel
 import kotlinx.coroutines.launch
 import com.whatsgo.app.ui.settings.components.LogoutDialog
-
+import com.whatsgo.app.ui.update.UpdateDialogs
+import com.whatsgo.app.ui.update.UpdateViewModel
 
 
 private val FloatingNavClearance = 110.dp
@@ -46,6 +47,7 @@ fun ChatAppRoot() {
     val themeViewModel: ThemeViewModel = viewModel()
     val chatListViewModel: ChatListViewModel = viewModel()
     val updatesViewModel: UpdatesViewModel = viewModel()
+    val updateViewModel: UpdateViewModel = viewModel()
     val chats by chatListViewModel.chats.collectAsState()
     val allStatuses by updatesViewModel.allStatuses.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -125,7 +127,8 @@ fun ChatAppRoot() {
             SettingsRegistry.actionHandlers = mapOf(
                 "edit_profile"     to { showProfileSettings = true },
                 "blocked_contacts" to { },
-                "delete_account"   to { }
+                "delete_account"   to { },
+                "check_updates" to { updateViewModel.check(manual = true) },
             )
         }
 
@@ -376,6 +379,7 @@ fun ChatAppRoot() {
                     onPostVideo = { path, caption -> updatesViewModel.postVideoStatus(path, caption) }
                 )
             }
+            UpdateDialogs(updateViewModel)
         }
     }
 }

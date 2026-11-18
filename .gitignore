@@ -16,6 +16,7 @@ Thumbs.db
 
 app/libs/*.aar
 app/libs/*.jar
+!app/libs/.gitkeep
 *.a
 
 *.jks

@@ -17,7 +17,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.whatsgo.app.ui.settings.components.CategoryCard
 import com.whatsgo.app.ui.settings.components.ProfileCard
 import com.whatsgo.app.ui.theme.ThemeViewModel
-
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.ui.platform.LocalContext
+import com.whatsgo.app.core.update.Updater
 @Composable
 fun SettingsScreen(
     onNavigateToCategory: (String) -> Unit,
@@ -63,6 +65,14 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(12.dp))
         }
+
+        CategoryCard(
+            icon = Icons.Filled.SystemUpdate,
+            title = "Check for updates",
+            subtitle = "Current version ${Updater.currentVersion(LocalContext.current)}",
+            onClick = { SettingsRegistry.actionHandlers["check_updates"]?.invoke() }
+        )
+        Spacer(Modifier.height(12.dp))
 
         Spacer(Modifier.height(16.dp))
 
