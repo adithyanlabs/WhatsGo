@@ -28,6 +28,7 @@ fun SettingsScreen(
     profileViewModel: com.whatsgo.app.ui.user.ProfileViewModel = viewModel()
 ) {
     val profile by profileViewModel.profile.collectAsState()
+    val appVersion = Updater.currentVersion(LocalContext.current)
 
     Column(
         Modifier
@@ -69,7 +70,7 @@ fun SettingsScreen(
         CategoryCard(
             icon = Icons.Filled.SystemUpdate,
             title = "Check for updates",
-            subtitle = "Current version ${Updater.currentVersion(LocalContext.current)}",
+            subtitle = "Current version $appVersion",
             onClick = { SettingsRegistry.actionHandlers["check_updates"]?.invoke() }
         )
         Spacer(Modifier.height(12.dp))
@@ -95,7 +96,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         Text(
-            "WhatsGo v0.2.0-alpha",
+            "WhatsGo $appVersion",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.align(Alignment.CenterHorizontally)
