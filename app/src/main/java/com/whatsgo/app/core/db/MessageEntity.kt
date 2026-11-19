@@ -6,8 +6,13 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "messages",
-    indices = [Index(value = ["chatJid", "timestamp"])]
+    indices = [
+        Index(value = ["chatJid", "timestamp"]),
+        Index(value = ["chatJid", "fromMe", "isRead"]),
+        Index(value = ["quotedId"])
+    ]
 )
+
 data class MessageEntity(
     @PrimaryKey val messageId: String,
     val chatJid: String,

@@ -8,7 +8,7 @@ import (
 func (c *Client) processEvent(evt interface{}) {
 	switch e := evt.(type) {
 	case *events.PairSuccess:
-            c.log.Infof("pair success, waiting for 515 reconnect + Connected")
+        c.log.Infof("pair success, waiting for 515 reconnect + Connected")
 
 	case *events.PairError:
 		c.cb.OnError(e.Error.Error())
@@ -45,28 +45,24 @@ func (c *Client) processEvent(evt interface{}) {
 
 	case *events.PushNameSetting:
 		name := c.inner.Store.PushName
-		c.log.Infof("own push name updated: %s", name)
 		c.cb.OnOwnName(name)
 
 	case *events.Picture:
 		if c.inner.Store.ID != nil && e.JID.User == c.inner.Store.ID.User {
-			c.log.Infof("own avatar changed, removed=%v pictureID=%s", e.Remove, e.PictureID)
 			c.cb.OnOwnAvatarChanged(e.PictureID, e.Remove)
 		}
 
 	case *events.UserAbout:
 		if c.inner.Store.ID != nil && e.JID.User == c.inner.Store.ID.User {
-			c.log.Infof("own about updated: %s", e.Status)
 			c.cb.OnOwnAbout(e.Status)
 		}
 
 	case *events.LoggedOut:
-		c.log.Warnf("logged out: %s", e.Reason.String())
 		c.cb.OnLoggedOut(e.Reason.String())
 
 	case *events.MarkChatAsRead:
     	if e.Action == nil || !e.Action.GetRead() {
-    		return // marked unread: ignore
+    		return
     	}
     	ts := e.Timestamp.Unix()
     	if r := e.Action.GetMessageRange(); r != nil && r.GetLastMessageTimestamp() > 0 {
@@ -84,7 +80,6 @@ func (c *Client) processEvent(evt interface{}) {
 			return
 		}
 		if e.Type == types.ReceiptTypeDelivered || e.Type == types.ReceiptTypeRead || e.Type == types.ReceiptTypeReadSelf {
-        	c.log.Infof("receipt type=%s fromMe=%v chat=%s ids=%v", e.Type, e.IsFromMe, e.Chat, e.MessageIDs)
 
         	status := "delivered"
         	switch {
@@ -121,8 +116,8 @@ func (c *Client) processEvent(evt interface{}) {
 func (c *Client) handleEvent(evt interface{}) {
 	switch evt.(type) {
 	case *events.Message, *events.Receipt, *events.MarkChatAsRead, *events.HistorySync,
-		*events.OfflineSyncPreview, *events.OfflineSyncCompleted:
-		c.queue <- func() { c.processEvent(evt) }
+    	*events.OfflineSyncPreview, *events.OfflineSyncCompleted, *events.Contact:
+    	c.queue <- func() { c.processEvent(evt) }
 	default:
 		defer func() {
 			if r := recover(); r != nil {

@@ -18,17 +18,13 @@ interface MessageDao {
     fun allChatJids(): Flow<List<String>>
 
     @Query("""
-        SELECT m1.chatJid as chatJid,
-               m1.text as lastMessage,
-               m1.timestamp as timestamp,
-               m1.fromMe as fromMe,
-               (SELECT COUNT(*) FROM messages m2
-                WHERE m2.chatJid = m1.chatJid AND m2.isRead = 0 AND m2.fromMe = 0) as unread
-        FROM messages m1
-        WHERE m1.timestamp = (SELECT MAX(m3.timestamp) FROM messages m3 WHERE m3.chatJid = m1.chatJid)
-        GROUP BY m1.chatJid
-        ORDER BY m1.timestamp DESC
-    """)
+    SELECT chatJid, text AS lastMessage, MAX(timestamp) AS timestamp, fromMe,
+           (SELECT COUNT(*) FROM messages u
+            WHERE u.chatJid = messages.chatJid AND u.fromMe = 0 AND u.isRead = 0) AS unread
+    FROM messages
+    GROUP BY chatJid
+    ORDER BY timestamp DESC
+""")
     fun observeChatSummaries(): Flow<List<ChatSummary>>
 
     @Query("UPDATE messages SET isRead = 1 WHERE chatJid = :chatJid AND fromMe = 0")

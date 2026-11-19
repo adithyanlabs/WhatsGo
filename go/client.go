@@ -11,6 +11,8 @@ import (
 	waStore "go.mau.fi/whatsmeow/store"
     "go.mau.fi/whatsmeow/proto/waCompanionReg"
     "google.golang.org/protobuf/proto"
+    "sync"
+
 )
 
 type LoginCallback interface {
@@ -46,16 +48,19 @@ type Client struct {
 	cb        LoginCallback
 	log       waLog.Logger
 	queue     chan func()
+	lidCache  sync.Map
 }
 
 var ErrNotLoggedInLocal = fmt.Errorf("not logged in")
 
 func NewClient(dbPath string, cb LoginCallback) (*Client, error) {
-	logger := waLog.Stdout("Engine", "DEBUG", true)
+	logger := waLog.Stdout("Engine", "WARN", true)
 	ctx := context.Background()
 	container, err := sqlstore.New(ctx, "sqlite",
-		"file:"+dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)",
-		logger)
+            "file:"+dbPath+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)"+
+                "&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"+
+                "&_pragma=cache_size(-16000)&_pragma=temp_store(MEMORY)",
+            logger)
 	if err != nil {
 		return nil, err
 	}

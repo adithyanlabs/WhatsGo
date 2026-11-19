@@ -123,29 +123,27 @@ func (c *Client) MarkStatusViewed(senderJid string, messageIDsCSV string) error 
 }
 
 func (c *Client) RevokeStatus(messageID string) error {
-    if c.inner.Store.ID == nil {
-        return ErrNotLoggedInLocal
-    }
+	if c.inner.Store.ID == nil {
+		return ErrNotLoggedInLocal
+	}
 
-    ownJID := c.inner.Store.ID.ToNonAD()
+	ownJID := c.inner.Store.ID.ToNonAD()
 
-    revokeMsg := c.inner.BuildRevoke(
-        types.StatusBroadcastJID,
-        ownJID,
-        types.MessageID(messageID),
-    )
+	revokeMsg := c.inner.BuildRevoke(
+		types.StatusBroadcastJID,
+		ownJID,
+		types.MessageID(messageID),
+	)
 
-    resp, err := c.inner.SendMessage(
-        context.Background(),
-        types.StatusBroadcastJID,
-        revokeMsg,
-        whatsmeow.SendRequestExtra{Peer: true},
-    )
-    if err != nil {
-        c.log.Errorf("revoke status %s failed: %v", messageID, err)
-        return err
-    }
-
-    c.log.Infof("revoke status %s sent, response ID: %s", messageID, resp.ID)
-    return nil
+	_, err := c.inner.SendMessage(
+		context.Background(),
+		types.StatusBroadcastJID,
+		revokeMsg,
+		whatsmeow.SendRequestExtra{Peer: true},
+	)
+	if err != nil {
+		c.log.Errorf("revoke status %s failed: %v", messageID, err)
+		return err
+	}
+	return nil
 }

@@ -24,12 +24,22 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+
+@OptIn(FlowPreview::class)
 class ChatListViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val session = SessionHolder.get(app)
+
+    private val nameCache = ConcurrentHashMap<String, String>()
+    private val missCache = ConcurrentHashMap<String, Long>()
+    private val missTtlMs = 30_000L
     private val summariesFlow = db.messageDao().observeChatSummaries()
+        .debounce(200)
         .shareIn(viewModelScope, SharingStarted.Eagerly, 1)
     private val contactsFlow = db.contactDao().observeAll()
+        .debounce(200)
         .shareIn(viewModelScope, SharingStarted.Eagerly, 1)
     private val _chats = MutableStateFlow<List<ChatItem>>(emptyList())
     val chats: StateFlow<List<ChatItem>> = _chats.asStateFlow()
@@ -152,7 +162,18 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun resolveName(jid: String): String {
-        db.contactDao().getName(jid)?.takeIf { it.isNotBlank() }?.let { return it }
+        nameCache[jid]?.let { return it }
+
+        val missAt = missCache[jid]
+        if (missAt != null && System.currentTimeMillis() - missAt < missTtlMs) {
+            return withContext(Dispatchers.Default) { PhoneFormatter.format(getApplication(), jid) }
+        }
+
+        db.contactDao().getName(jid)?.takeIf { it.isNotBlank() }?.let {
+            nameCache[jid] = it
+            return it
+        }
+
         val isGroup = jid.endsWith("@g.us")
         val fetched = withContext(Dispatchers.IO) {
             runCatching {
@@ -161,9 +182,13 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
         }?.takeIf { it.isNotBlank() }
 
         if (fetched != null && !PhoneFormatter.isPhoneLike(fetched)) {
+            nameCache[jid] = fetched
+            missCache.remove(jid)
             db.contactDao().insertNameIfAbsent(jid, fetched)
             return fetched
         }
+
+        missCache[jid] = System.currentTimeMillis()
         return withContext(Dispatchers.Default) { PhoneFormatter.format(getApplication(), jid) }
     }
 

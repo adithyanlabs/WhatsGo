@@ -35,6 +35,9 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import com.whatsgo.app.core.GroupInfoData
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+
 private const val TYPING_HEARTBEAT_MS = 3000L
 private const val TYPING_IDLE_TIMEOUT_MS = 4000L
 private const val PAGE_SIZE = 40
@@ -127,13 +130,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         limitFlow.value = limitFlow.value + PAGE_SIZE
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     private fun startMessageCollect(chatJid: String) {
         collectJob = viewModelScope.launch {
             val cache = HashMap<String, ChatMessage>()
             limitFlow
                 .flatMapLatest { limit ->
-                    db.messageDao().observeRecent(chatJid, limit).map { limit to it }
+                    db.messageDao().observeRecent(chatJid, limit)
+                        .debounce(120)
+                        .map { limit to it }
                 }
                 .map { (limit, rows) ->
                     Page(

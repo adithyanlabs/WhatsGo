@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StatusViewerEntity::class,
         ChannelEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -48,6 +48,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_messages_chatJid_fromMe_isRead` " +
+                            "ON `messages` (`chatJid`, `fromMe`, `isRead`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_messages_quotedId` " +
+                            "ON `messages` (`quotedId`)"
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -55,7 +68,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "whatsgo_messages.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .fallbackToDestructiveMigration(true)
                     .build().also { instance = it }
             }

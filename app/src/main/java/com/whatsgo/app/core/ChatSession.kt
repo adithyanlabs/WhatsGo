@@ -94,6 +94,7 @@ class ChatSession(dbPath: String, context: Context) {
 
     private sealed class Op {
         class Msg(val m: Incoming) : Op()
+        class ContactName(val jid: String, val name: String) : Op()
         class Status(val id: String, val status: String) : Op()
         class StatusMsg(val s: IncomingStatus) : Op()
         class StatusViewed(val statusId: String, val viewerJid: String) : Op()
@@ -105,7 +106,6 @@ class ChatSession(dbPath: String, context: Context) {
     private val http = okhttp3.OkHttpClient()
 
     private val ops = Channel<Op>(Channel.UNLIMITED)
-    private val checkedGroups = HashSet<String>()
     private val avatarRefreshQueue = Channel<String>(Channel.UNLIMITED)
     private val avatarQueued: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
@@ -168,7 +168,7 @@ class ChatSession(dbPath: String, context: Context) {
         }
 
         override fun onContactName(jid: String, name: String) {
-            scope.launch { db.contactDao().upsertName(jid, name) }
+            ops.trySend(Op.ContactName(jid, name))
         }
 
         override fun onChatRead(chatJid: String, timestamp: Long) {
@@ -301,27 +301,25 @@ class ChatSession(dbPath: String, context: Context) {
         scope.launch {
             val batch = ArrayList<Incoming>(500)
             val history = ArrayList<Op.HistoryChat>()
+            val statuses = ArrayList<Op.Status>()
+            val contacts = ArrayList<Op.ContactName>()
             for (first in ops) {
                 try {
+                    if (first is Op.Msg || first is Op.Status || first is Op.ContactName) delay(250)
                     var cur: Op? = first
                     while (cur != null) {
                         when (cur) {
                             is Op.HistoryChat -> history.add(cur)
+                            is Op.ContactName -> contacts.add(cur)
+                            is Op.Status -> statuses.add(cur)
                             is Op.Msg -> {
                                 batch.add(cur.m)
-                                if (batch.size >= 500) flush(batch)
-                            }
-                            is Op.Status -> {
-                                flush(batch)
-                                applyHistory(history)   // NEW
-                                if (cur.status == "read_self") {
-                                    db.messageDao().markReadUpTo(cur.id)
-                                } else {
-                                    db.messageDao().setStatus(cur.id, cur.status)
+                                if (batch.size >= 500) {
+                                    flush(batch); flushStatuses(statuses); flushContacts(contacts)
                                 }
                             }
                             is Op.ChatRead -> {
-                                flush(batch)
+                                flush(batch); flushStatuses(statuses); flushContacts(contacts)
                                 applyHistory(history)
                                 db.messageDao().markChatReadUpTo(cur.chatJid, cur.ts)
                             }
@@ -341,19 +339,19 @@ class ChatSession(dbPath: String, context: Context) {
                                 )
                             }
                             Op.OfflineDone -> {
-                                flush(batch)
+                                flush(batch); flushStatuses(statuses); flushContacts(contacts)
                                 applyHistory(history)
                                 HistorySyncService.finishOffline()
+                                scope.launch { syncGroupNames() }
                             }
                         }
                         cur = ops.tryReceive().getOrNull()
                     }
-                    flush(batch)
+                    flush(batch); flushStatuses(statuses); flushContacts(contacts)
                     applyHistory(history)
                 } catch (t: Throwable) {
                     Log.e("ChatSession", "ops failed", t)
-                    batch.clear()
-                    history.clear()
+                    batch.clear(); history.clear(); statuses.clear(); contacts.clear()
                     HistorySyncService.finishOffline()
                 }
             }
@@ -452,6 +450,25 @@ class ChatSession(dbPath: String, context: Context) {
         list.clear()
     }
 
+    private suspend fun flushStatuses(list: ArrayList<Op.Status>) {
+        if (list.isEmpty()) return
+        db.withTransaction {
+            for (s in list) {
+                if (s.status == "read_self") db.messageDao().markReadUpTo(s.id)
+                else db.messageDao().setStatus(s.id, s.status)
+            }
+        }
+        list.clear()
+    }
+
+    private suspend fun flushContacts(list: ArrayList<Op.ContactName>) {
+        if (list.isEmpty()) return
+        db.withTransaction {
+            list.forEach { db.contactDao().upsertName(it.jid, it.name) }
+        }
+        list.clear()
+    }
+
     private suspend fun flush(batch: ArrayList<Incoming>) {
         if (batch.isEmpty()) return
         db.withTransaction {
@@ -480,30 +497,30 @@ class ChatSession(dbPath: String, context: Context) {
     }
 
     private suspend fun saveNames(batch: List<Incoming>) {
-        val names = HashMap<String, String>()
         val pushNames = HashMap<String, String>()
-        val groupFlags = HashMap<String, Boolean>()
-        val chatJids = batch.map { it.chatJid }.toHashSet()
         for (m in batch) {
-            val isGroup = groupFlags.getOrPut(m.chatJid) {
-                runCatching { client.isGroupJID(m.chatJid) }.getOrDefault(false)
-            }
-            if (isGroup) {
-                if (checkedGroups.add(m.chatJid)) {
-                    val existing = db.contactDao().getName(m.chatJid)
-                    if (existing.isNullOrBlank()) {
-                        val g = runCatching { client.getGroupName(m.chatJid) }.getOrNull()
-                        if (!g.isNullOrBlank()) names[m.chatJid] = g
-                    }
-                }
-                if (!m.fromMe && m.pushName.isNotBlank()) pushNames[m.senderJid] = m.pushName
-            } else if (!m.fromMe && m.pushName.isNotBlank()) {
-                pushNames[m.chatJid] = m.pushName
-            }
+            if (m.fromMe || m.pushName.isBlank()) continue
+            val isGroup = m.chatJid.endsWith("@g.us")   // no JNI
+            if (isGroup) pushNames[m.senderJid] = m.pushName
+            else pushNames[m.chatJid] = m.pushName
         }
+        if (pushNames.isEmpty()) return
         db.withTransaction {
-            names.forEach { (jid, name) -> db.contactDao().upsertName(jid, name) }
             pushNames.forEach { (jid, name) -> db.contactDao().insertNameIfAbsent(jid, name) }
+        }
+    }
+
+    private suspend fun syncGroupNames() {
+        runCatching {
+            val json = withContext(Dispatchers.IO) { client.getJoinedGroupsJSON() }
+            val arr = org.json.JSONArray(json)
+            db.withTransaction {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val jid = o.optString("jid"); val name = o.optString("name")
+                    if (jid.isNotBlank() && name.isNotBlank()) db.contactDao().upsertName(jid, name)
+                }
+            }
         }
     }
 
