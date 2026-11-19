@@ -23,8 +23,8 @@ android {
         applicationId = "com.whatsgo.app"
         minSdk = 24
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.4.0-alpha"
+        versionCode = 4
+        versionName = "0.4.1-alpha"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
