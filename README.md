@@ -69,11 +69,23 @@ Build the debug APK:
 ./gradlew assembleDebug
 ```
 
-Build the release APK:
+Build the Go Android library and signed release APK locally:
 
 ```bash
-./gradlew clean assembleRelease
+cd go
+GOTOOLCHAIN=local go build ./...
+GOTOOLCHAIN=local gomobile bind \
+  -v \
+  -target=android/arm64 \
+  -androidapi 24 \
+  -ldflags="-s -w" \
+  -o ../app/libs/engine.aar \
+  .
+cd ..
+./gradlew assembleRelease
 ```
+
+Release signing uses the local `keystore.properties` and `app/release-key.jks` files. Keep both out of Git.
 
 The release APK will be generated at:
 
@@ -86,6 +98,13 @@ app/build/outputs/apk/release/app-release.apk
 You can find available builds on the [GitHub Releases](https://github.com/adithyanlabs/WhatsGo/releases) page.
 
 WhatsGo is currently in alpha, so releases are intended primarily for testing.
+
+### Automated builds and manual releases
+
+GitHub Actions builds a debug APK and Go Android library for pushes and pull requests to `main`. Each build is available as a temporary workflow artifact for 14 days. These builds do not use the release signing key or publish releases.
+
+To publish a release after grouping several commits, update `versionName` and increment `versionCode` in `app/build.gradle.kts`. Build the signed APK locally, push the source commit and matching version tag, then create the GitHub Release manually and attach `app/build/outputs/apk/release/app-release.apk`.
+
 
 ## Disclaimer
 

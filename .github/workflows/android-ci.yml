@@ -1,0 +1,79 @@
+name: Android CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'ndk;30.0.16248370'
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
+          go_bin="$(go env GOPATH)/bin"
+          echo "$go_bin" >> "$GITHUB_PATH"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+          export PATH="$go_bin:$PATH"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
+          GOTOOLCHAIN=local gomobile init
+
+      - name: Build Go package and Android AAR
+        working-directory: go
+        run: |
+          GOTOOLCHAIN=local go build ./...
+          GOTOOLCHAIN=local gomobile bind \
+            -v \
+            -target=android/arm64 \
+            -androidapi 24 \
+            -ldflags="-s -w" \
+            -o ../app/libs/engine.aar \
+            .
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Keep debug APK for this commit
+        uses: actions/upload-artifact@v6
+        with:
+          name: whatsgo-debug-${{ github.sha }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
