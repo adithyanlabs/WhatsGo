@@ -8,6 +8,9 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	waLog "go.mau.fi/whatsmeow/util/log"
 	_ "modernc.org/sqlite"
+	waStore "go.mau.fi/whatsmeow/store"
+    "go.mau.fi/whatsmeow/proto/waCompanionReg"
+    "google.golang.org/protobuf/proto"
 )
 
 type LoginCallback interface {
@@ -31,6 +34,10 @@ type LoginCallback interface {
 	OnOfflineSyncPreview(total, messages, notifications, receipts int64)
 	OnOfflineSyncCompleted(count int64)
 	OnContactName(jid string, name string)
+	OnChatRead(chatJID string, timestamp int64)
+	OnChatPresence(chatJID string, senderJID string, state string, media string)
+	OnPresence(senderJID string, online bool, lastSeen int64)
+	OnChannelEvent(kind string, jid string)
 }
 
 type Client struct {
@@ -56,12 +63,16 @@ func NewClient(dbPath string, cb LoginCallback) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{
-		inner:     wa.NewClient(device, logger.Sub("Client")),
-		container: container,
-		cb:        cb,
-		log:       logger.Sub("Events"),
-	}
+	
+	waStore.DeviceProps.Os = proto.String("WhatsGo")
+    waStore.DeviceProps.PlatformType = waCompanionReg.DeviceProps_ANDROID_PHONE.Enum()
+
+    c := &Client{
+        inner:     wa.NewClient(device, logger.Sub("Client")),
+        container: container,
+        cb:        cb,
+        log:       logger.Sub("Events"),
+    }
 	c.queue = make(chan func(), 8192)
 	go c.worker()
 	c.inner.AddEventHandler(c.handleEvent)

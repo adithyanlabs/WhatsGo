@@ -27,14 +27,39 @@ import android.content.Intent
 import com.whatsgo.app.core.update.UpdateDownloadService
 import com.whatsgo.app.core.update.Updater
 import java.io.File
-
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.whatsgo.app.core.PhoneFormatter
+import com.whatsgo.app.ui.update.UpdateDialogs
+import com.whatsgo.app.ui.update.UpdateViewModel
 class MainActivity : ComponentActivity() {
+    private var presenceJob: kotlinx.coroutines.Job? = null
+
+    override fun onStart() {
+        super.onStart()
+        updatePresence(available = true)
+    }
+
+    override fun onStop() {
+        updatePresence(available = false)
+        super.onStop()
+    }
+
+    private fun updatePresence(available: Boolean) {
+        presenceJob?.cancel()
+        presenceJob = lifecycleScope.launch(Dispatchers.IO) {
+            SessionHolder.get(applicationContext).setAppForeground(available)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        lifecycleScope.launch(Dispatchers.Default) { PhoneFormatter.warmUp(applicationContext) }
         setContent {
             val context = LocalContext.current
             val session = remember { SessionHolder.get(context) }
+            val updateViewModel: UpdateViewModel = viewModel()
             var loggedIn by remember { mutableStateOf(session.isLoggedIn()) }
             val scope = rememberCoroutineScope()
 
@@ -80,6 +105,7 @@ class MainActivity : ComponentActivity() {
                         ChatAppRoot()
                     } else {
                         LoginScreen(onLoginSuccess = { loggedIn = true })
+                        UpdateDialogs(updateViewModel)
                     }
                 }
             }

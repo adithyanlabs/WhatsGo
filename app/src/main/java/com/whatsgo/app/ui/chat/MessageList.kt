@@ -56,8 +56,20 @@ fun MessageList(
     onReplySwipe: (ChatMessage) -> Unit,
     showSenderNames: Boolean,
     onMediaClick: (ChatMessage) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLoadMore: () -> Unit = {}
 ) {
+    val nearEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.totalItemsCount > 0 && last >= info.totalItemsCount - 8
+        }
+    }
+    LaunchedEffect(nearEnd, messages.size) {
+        if (nearEnd) onLoadMore()
+    }
+
     LazyColumn(
         state = listState,
         reverseLayout = true,
@@ -65,8 +77,17 @@ fun MessageList(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(messages, key = { it.id }) { msg ->
-            SwipeableMessageBubble(message = msg, onReplyTriggered = { onReplySwipe(msg) }, showSenderName = showSenderNames, onMediaClick = onMediaClick)
+        items(
+            items = messages,
+            key = { it.messageId },
+            contentType = { if (it.media != null) 1 else 0 }
+        ) { msg ->
+            SwipeableMessageBubble(
+                message = msg,
+                onReplyTriggered = { onReplySwipe(msg) },
+                showSenderName = showSenderNames,
+                onMediaClick = onMediaClick
+            )
         }
     }
 }

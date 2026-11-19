@@ -73,4 +73,40 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
     )
 """)
     suspend fun applyHistoryUnread(chatJid: String, unread: Int)
+
+    @Query("SELECT messageId FROM messages WHERE isRead = 1 AND messageId IN (:ids)")
+    suspend fun readIds(ids: List<String>): List<String>
+
+    @Query("UPDATE messages SET isRead = 1 WHERE chatJid = :chatJid AND fromMe = 0 AND isRead = 0 AND timestamp <= :ts")
+    suspend fun markChatReadUpTo(chatJid: String, ts: Long)
+
+    @Query("""
+    SELECT m.messageId AS messageId, m.chatJid AS chatJid, m.senderJid AS senderJid,
+           m.text AS text, m.timestamp AS timestamp, m.fromMe AS fromMe,
+           m.isRead AS isRead, m.status AS status,
+           m.quotedId AS quotedId, m.quotedText AS quotedText, m.quotedSenderJid AS quotedSenderJid,
+           m.mediaType AS mediaType, m.mediaCaption AS mediaCaption,
+           m.mediaLocalPath AS mediaLocalPath, m.mediaThumbnail AS mediaThumbnail,
+           c.name AS senderName,
+           q.text AS origText, q.fromMe AS origFromMe, q.senderJid AS origSenderJid,
+           q.mediaType AS origMediaType, qc.name AS origSenderName
+    FROM messages m
+    LEFT JOIN contacts c  ON c.jid = m.senderJid
+    LEFT JOIN messages q  ON q.messageId = m.quotedId
+    LEFT JOIN contacts qc ON qc.jid = q.senderJid
+    WHERE m.chatJid = :chatJid
+    ORDER BY m.timestamp DESC, m.rowid DESC
+    LIMIT :limit
+""")
+    fun observeRecent(chatJid: String, limit: Int): Flow<List<MessageRow>>
+
+    data class LocalState(
+        val messageId: String,
+        val mediaLocalPath: String?,
+        val status: String,
+        val isRead: Boolean
+    )
+
+    @Query("SELECT messageId, mediaLocalPath, status, isRead FROM messages WHERE messageId IN (:ids)")
+    suspend fun localState(ids: List<String>): List<LocalState>
 }

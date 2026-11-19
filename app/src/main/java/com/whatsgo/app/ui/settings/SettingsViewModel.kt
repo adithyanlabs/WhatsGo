@@ -3,13 +3,16 @@ package com.whatsgo.app.ui.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.whatsgo.app.core.SessionHolder
 import com.whatsgo.app.ui.settings.data.SettingsRepository
 import com.whatsgo.app.ui.settings.model.SettingType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -40,7 +43,12 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setToggle(id: String, value: Boolean) {
-        viewModelScope.launch { repo.setBoolean(id, value) }
+        viewModelScope.launch {
+            repo.setBoolean(id, value)
+            if (id == "send_online_presence") {
+                SessionHolder.get(getApplication()).refreshPresence()
+            }
+        }
     }
 
     fun setSelect(id: String, key: String) {

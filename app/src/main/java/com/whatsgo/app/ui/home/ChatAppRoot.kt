@@ -82,6 +82,10 @@ fun ChatAppRoot() {
 
         val allChatsListState = rememberLazyListState()
         val groupsListState = rememberLazyListState()
+
+        val channelChats by chatListViewModel.channels.collectAsState()
+        val channelsListState = rememberLazyListState()
+
         val tabs = TopTab.entries.toTypedArray()
         val pagerState = rememberPagerState(initialPage = 0) { tabs.size }
         val currentTab by remember { derivedStateOf { tabs[pagerState.currentPage] } }
@@ -263,15 +267,22 @@ fun ChatAppRoot() {
                                                 chats = directChats,
                                                 listState = allChatsListState,
                                                 bottomPadding = FloatingNavClearance,
-                                                onChatClick = { chatListViewModel.markRead(it.id); selectedChat = it },
+                                                onChatClick = { selectedChat = it },
                                                 onAvatarNeeded = { session.requestAvatarRefresh(it) }
                                             )
                                             TopTab.GROUPS -> ChatList(
                                                 chats = groupChats,
                                                 listState = groupsListState,
                                                 bottomPadding = FloatingNavClearance,
-                                                onChatClick = { chatListViewModel.markRead(it.id); selectedChat = it },
+                                                onChatClick = { selectedChat = it },
                                                 onAvatarNeeded = { session.requestAvatarRefresh(it) }
+                                            )
+                                            TopTab.CHANNELS -> if (channelChats.isEmpty()) EmptyTabPlaceholder(TopTab.CHANNELS) else ChatList(
+                                                chats = channelChats,
+                                                listState = channelsListState,
+                                                bottomPadding = FloatingNavClearance,
+                                                onChatClick = { selectedChat = it },
+                                                onAvatarNeeded = { }
                                             )
                                             else -> EmptyTabPlaceholder(tabs[innerPage])
                                         }

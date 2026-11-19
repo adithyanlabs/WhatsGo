@@ -30,5 +30,11 @@ func (c *Client) MarkChatRead(chatJid string, messageIDsCSV string, senderJid st
 		}
 	}
 
-	return c.inner.MarkRead(context.Background(), ids, time.Now(), chat, sender)
+	if chat.Server == types.DefaultUserServer && c.inner.Store != nil && c.inner.Store.LIDs != nil {
+		if lid, err := c.inner.Store.LIDs.GetLIDForPN(context.Background(), chat); err == nil && !lid.IsEmpty() {
+			chat = lid
+		}
+	}
+
+	return c.inner.MarkRead(context.Background(), ids, time.Now(), chat, sender.ToNonAD())
 }

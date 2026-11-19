@@ -6,15 +6,14 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-func (c *Client) normJID(jid types.JID) types.JID {
-	if jid.Server != types.HiddenUserServer {
-		return jid
+func (c *Client) normJID(j types.JID) types.JID {
+	j = j.ToNonAD()
+	if j.Server == types.HiddenUserServer && c.inner.Store != nil && c.inner.Store.LIDs != nil {
+		if pn, err := c.inner.Store.LIDs.GetPNForLID(context.Background(), j); err == nil && !pn.IsEmpty() {
+			return pn
+		}
 	}
-	pn, err := c.inner.Store.LIDs.GetPNForLID(context.Background(), jid)
-	if err != nil || pn.IsEmpty() {
-		return jid
-	}
-	return pn
+	return j
 }
 
 func (c *Client) normJIDStr(s string) string {

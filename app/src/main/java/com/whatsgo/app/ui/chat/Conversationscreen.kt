@@ -38,9 +38,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.platform.LocalContext
+import com.whatsgo.app.core.PhoneFormatter
 import com.whatsgo.app.core.SessionHolder
 import com.whatsgo.app.core.db.AppDatabase
-
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.flowOf
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ConversationScreen(
@@ -48,6 +51,7 @@ fun ConversationScreen(
     contactName: String,
     contactStatus: String,
     contactAvatarPath: String? = null,
+    readOnly: Boolean = false,
     onBack: () -> Unit = {},
     viewModel: ChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
@@ -58,29 +62,53 @@ fun ConversationScreen(
         db.contactDao().observeByJid(chatJid)
     }.collectAsState(initial = null)
 
+    val channel by remember(chatJid, readOnly) {
+        if (readOnly) db.channelDao().observeByJid(chatJid) else flowOf(null)
+    }.collectAsState(initial = null)
+
+    val groupInfo by viewModel.groupInfo.collectAsState()
+
+    LaunchedEffect(chatJid, readOnly) {
+        if (readOnly) SessionHolder.get(context).refreshChannelInfo(chatJid)
+    }
+
     val avatarPath = liveContact?.avatarPath ?: contactAvatarPath
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val coroutineScope = rememberCoroutineScope()
     val isKeyboardOpen = WindowInsets.isImeVisible
 
-    LaunchedEffect(chatJid) {
+    DisposableEffect(chatJid) {
         viewModel.open(chatJid)
         runCatching { SessionHolder.get(context).requestAvatarRefresh(chatJid) }
+        onDispose {
+            viewModel.close()
+        }
     }
 
-    val phone = remember(chatJid) {
-        if (chatJid.endsWith("@s.whatsapp.net")) {
-            "+" + chatJid.substringBefore("@")
+    val phone by produceState(initialValue = "", chatJid) {
+        value = if (chatJid.endsWith("@s.whatsapp.net")) {
+            withContext(Dispatchers.Default) { PhoneFormatter.format(context, chatJid) }
         } else ""
     }
 
-    val profile = remember(contactName, contactStatus, avatarPath, phone) {
+    val liveSubtitle by viewModel.presenceSubtitle.collectAsState()
+    val channelStatus = channel?.let { "Channel · ${formatCount(it.subscribers)} followers" }
+    val groupStatus = groupInfo?.let { "${it.memberCount} members" }
+    val displayStatus = liveSubtitle ?: channelStatus ?: groupStatus ?: contactStatus
+    val isOnline = displayStatus.equals("online", ignoreCase = true) ||
+            displayStatus.startsWith("typing", ignoreCase = true) ||
+            displayStatus.startsWith("recording", ignoreCase = true)
+
+    val shownName = channel?.name
+        ?: groupInfo?.name?.takeIf { it.isNotBlank() }
+        ?: contactName
+    val profile = remember(shownName, displayStatus, isOnline, avatarPath, phone) {
         ChatProfile(
-            name = contactName,
-            avatarLetter = contactName.take(1).uppercase(),
-            statusText = contactStatus,
-            isOnline = contactStatus.equals("online", ignoreCase = true),
+            name = shownName,
+            avatarLetter = shownName.take(1).uppercase(),
+            statusText = displayStatus,
+            isOnline = isOnline,
             phone = phone,
             avatarPath = avatarPath
         )
@@ -90,6 +118,8 @@ fun ConversationScreen(
     var replyingTo by remember { mutableStateOf<ChatMessage?>(null) }
     var showMediaSheet by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
+    var showChannelProfile by remember { mutableStateOf(false) }
+    var showGroupProfile by remember { mutableStateOf(false) }
     var viewingMedia by remember { mutableStateOf<ChatMessage?>(null) }
 
     val listState = rememberLazyListState()
@@ -154,35 +184,46 @@ fun ConversationScreen(
                     profile = profile,
                     onBack = onBack,
                     onProfileClick = {
+                        android.util.Log.d("ChannelUI", "profile click readOnly=$readOnly")
                         coroutineScope.launch {
                             if (isKeyboardOpen) {
                                 keyboardController?.hide()
                                 delay(290.milliseconds)
                             }
-                            showProfile = true
+                            when {
+                                readOnly -> showChannelProfile = true
+                                isGroup -> showGroupProfile = true
+                                else -> showProfile = true
+                            }
                         }
                     }
                 )
             },
             bottomBar = {
-                MessageInput(
-                    replyingTo = replyingTo,
-                    onDismissReply = { replyingTo = null },
-                    onAttachClick = {
-                        coroutineScope.launch {
-                            if (isKeyboardOpen) {
-                                keyboardController?.hide()
-                                delay(290.milliseconds)
+                if (!readOnly) {
+                    MessageInput(
+                        replyingTo = replyingTo,
+                        onDismissReply = { replyingTo = null },
+                        onAttachClick = {
+                            coroutineScope.launch {
+                                if (isKeyboardOpen) {
+                                    keyboardController?.hide()
+                                    delay(290.milliseconds)
+                                }
+                                showMediaSheet = true
                             }
-                            showMediaSheet = true
+                        },
+                        onTyping = { text ->
+                            viewModel.onUserTyping(text)
+                        },
+                        onSend = { text ->
+                            viewModel.send(text, replyTo = replyingTo)
+                            viewModel.onUserTyping("")
+                            replyingTo = null
+                            coroutineScope.launch { listState.animateScrollToItem(0) }
                         }
-                    },
-                    onSend = { text ->
-                        viewModel.send(text, replyTo = replyingTo)
-                        replyingTo = null
-                        coroutineScope.launch { listState.animateScrollToItem(0) }
-                    }
-                )
+                    )
+                }
             }
         ) { padding ->
             MessageList(
@@ -190,6 +231,7 @@ fun ConversationScreen(
                 listState = listState,
                 onReplySwipe = { replyingTo = it },
                 showSenderNames = isGroup,
+                onLoadMore = viewModel::loadMore,
                 onMediaClick = { msg ->
                     val media = msg.media
                     if (media != null && media.isDownloaded) {
@@ -200,6 +242,13 @@ fun ConversationScreen(
                 },
                 modifier = Modifier.padding(padding)
             )
+        }
+
+        val channelLoading by viewModel.channelLoading.collectAsState()
+        if (readOnly && messages.isEmpty() && channelLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         }
 
         if (showMediaSheet) {
@@ -240,6 +289,24 @@ fun ConversationScreen(
                 profile = profile,
                 onDismiss = { showProfile = false },
                 fetchAbout = fetchAbout
+            )
+        }
+        if (showChannelProfile) {
+            android.util.Log.d("ChannelUI", "showChannelProfile=$showChannelProfile")
+            ChannelProfileSheet(
+                name = shownName,
+                avatarPath = avatarPath,
+                channel = channel,
+                onDismiss = { showChannelProfile = false }
+            )
+        }
+
+        if (showGroupProfile) {
+            GroupProfileSheet(
+                name = shownName,
+                avatarPath = avatarPath,
+                info = groupInfo,
+                onDismiss = { showGroupProfile = false }
             )
         }
 

@@ -50,35 +50,16 @@ class HistorySyncService : Service() {
         super.onCreate()
         running = true
         createChannel()
+        val nm = getSystemService(NotificationManager::class.java)
 
         scope.launch {
             ui.collect {
-                getSystemService(NotificationManager::class.java)
-                    .notify(NOTIF_ID, buildNotification(it))
-                delay(500)
-            }
-        }
-        scope.launch { ui.collect { armWatchdog(it) } }
-
-        scope.launch {
-            SessionHolder.get(applicationContext).events.collect { e ->
-                when (e) {
-                    is LoginEvent.Connected ->
-                        ui.update { it.copy(phase = Phase.SYNCING, code = null) }
-                    is LoginEvent.LoggedOut -> shutDown()
-                    else -> Unit
-                }
-            }
-        }
-
-        scope.launch {
-            ui.collect {
+                nm.notify(NOTIF_ID, buildNotification(it))
                 if (it.phase == Phase.OFFLINE && it.finished) {
+                    delay(800) // let 100% show
                     shutDown()
                     return@collect
                 }
-                getSystemService(NotificationManager::class.java)
-                    .notify(NOTIF_ID, buildNotification(it))
                 delay(500)
             }
         }
@@ -96,7 +77,6 @@ class HistorySyncService : Service() {
                 }
             }
         }
-
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -271,30 +251,34 @@ class HistorySyncService : Service() {
         fun report(p: Int?, chatDone: Boolean = false) {
             if (!running) return
             ui.update { s ->
+                if (s.phase == Phase.OFFLINE) return@update s
                 s.copy(
                     phase = Phase.SYNCING,
                     code = null,
-                    progress = when {
-                        p == null -> s.progress
-                        else -> maxOf(p, s.progress ?: 0)
-                    },
+                    progress = if (p == null) s.progress else maxOf(p, s.progress ?: 0),
                     chats = if (chatDone) s.chats + 1 else s.chats
                 )
             }
         }
 
         fun startOffline(context: Context, total: Int) {
-            if (running && ui.value.phase != Phase.OFFLINE) return
+            if (running && ui.value.phase == Phase.OFFLINE) {
+                ui.update { it.copy(total = maxOf(it.total, total)) }
+                return
+            }
             ui.value = Ui(phase = Phase.OFFLINE, total = total)
             runCatching { start(context) }
+                .onFailure { android.util.Log.w("HistorySync", "startOffline failed", it) }
         }
 
         fun reportOffline(n: Int) {
-            ui.update { if (it.phase == Phase.OFFLINE) it.copy(done = it.done + n) else it }
+            ui.update {
+                if (it.phase == Phase.OFFLINE) it.copy(done = minOf(it.done + n, maxOf(it.total, it.done + n))) else it
+            }
         }
 
         fun finishOffline() {
-            ui.update { if (it.phase == Phase.OFFLINE) it.copy(finished = true) else it }
+            ui.update { if (it.phase == Phase.OFFLINE) it.copy(done = it.total, finished = true) else it }
         }
     }
 }

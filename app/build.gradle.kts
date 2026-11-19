@@ -23,8 +23,8 @@ android {
         applicationId = "com.whatsgo.app"
         minSdk = 24
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.3.0-alpha"
+        versionCode = 3
+        versionName = "0.4.0-alpha"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -75,6 +75,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.compose.runtime.annotation)
     implementation(files("libs/engine.aar"))
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
@@ -84,6 +85,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("io.michaelrocks:libphonenumber-android:9.0.40")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.foundation)

@@ -1,9 +1,13 @@
 package com.whatsgo.app.core.db
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "messages")
+@Entity(
+    tableName = "messages",
+    indices = [Index(value = ["chatJid", "timestamp"])]
+)
 data class MessageEntity(
     @PrimaryKey val messageId: String,
     val chatJid: String,

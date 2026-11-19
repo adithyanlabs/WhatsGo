@@ -21,13 +21,20 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.whatsgo.app.core.HistorySyncService
+import com.whatsgo.app.ui.settings.data.SettingsRepository
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
+
+import kotlinx.coroutines.Job
+import kotlin.time.Duration.Companion.milliseconds
 
 sealed class LoginEvent {
     data object Idle : LoginEvent()
@@ -39,6 +46,8 @@ sealed class LoginEvent {
     data class OwnNameUpdated(val name: String) : LoginEvent()
     data class OwnAboutUpdated(val about: String) : LoginEvent()
     data class OwnAvatarChanged(val removed: Boolean) : LoginEvent()
+    data class ChatPresenceUpdated(val chatJid: String, val senderJid: String, val state: String, val media: String) : LoginEvent()
+    data class PresenceUpdated(val senderJid: String, val online: Boolean, val lastSeen: Long) : LoginEvent()
 }
 
 private const val STATUS_TTL_MS = 24L * 60 * 60 * 1000
@@ -46,8 +55,11 @@ private const val STATUS_TTL_MS = 24L * 60 * 60 * 1000
 class ChatSession(dbPath: String, context: Context) {
 
     private val appContext = context.applicationContext
-    private val _events = MutableStateFlow<LoginEvent>(LoginEvent.Idle)
-    val events: StateFlow<LoginEvent> = _events.asStateFlow()
+    private val _events = kotlinx.coroutines.flow.MutableSharedFlow<LoginEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val events: kotlinx.coroutines.flow.SharedFlow<LoginEvent> = _events.asSharedFlow()
 
     private val db = AppDatabase.get(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -86,6 +98,7 @@ class ChatSession(dbPath: String, context: Context) {
         class StatusMsg(val s: IncomingStatus) : Op()
         class StatusViewed(val statusId: String, val viewerJid: String) : Op()
         class HistoryChat(val chatJid: String, val name: String, val unread: Int) : Op()
+        class ChatRead(val chatJid: String, val ts: Long) : Op()
         data object OfflineDone : Op()
     }
 
@@ -95,41 +108,84 @@ class ChatSession(dbPath: String, context: Context) {
     private val checkedGroups = HashSet<String>()
     private val avatarRefreshQueue = Channel<String>(Channel.UNLIMITED)
     private val avatarQueued: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    private val subscribed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    @Volatile private var watchedJid: String? = null
+    private val presenceMutex = kotlinx.coroutines.sync.Mutex()
+
+    private val presenceOnline = AtomicBoolean(false)
+    private val connected = AtomicBoolean(false)
+    private var presenceJob: kotlinx.coroutines.Job? = null
+    private val appForeground = AtomicBoolean(false)
     private val prefs = appContext.getSharedPreferences("whatsgo_sync", Context.MODE_PRIVATE)
+    private val settingsRepo = SettingsRepository(appContext)
 
     private val fetchStarted = AtomicBoolean(false)
 
     private val _historyProgress = MutableStateFlow<Int?>(null)
     val historyProgress: StateFlow<Int?> = _historyProgress
 
+    data class PresenceInfo(val online: Boolean, val lastSeen: Long)
+    private val presenceCache = ConcurrentHashMap<String, PresenceInfo>()
+
+    private fun presenceKey(jid: String) = jid.substringBefore(":").substringBefore("@")
+
     private val callback = object : LoginCallback {
-        override fun onQrCode(payload: String) { _events.value = LoginEvent.QrReady(payload) }
-        override fun onPairingCode(code: String) { _events.value = LoginEvent.PairingReady(code) }
+        override fun onQrCode(payload: String) { _events.tryEmit(LoginEvent.QrReady(payload)) }
+        override fun onPairingCode(code: String) { _events.tryEmit(LoginEvent.PairingReady(code)) }
         override fun onConnected() {
+            connected.set(true)
+            presenceOnline.set(false);
+            subscribed.clear()
             HistorySyncService.markConnected()
-            _events.value = LoginEvent.Connected
+            _events.tryEmit(LoginEvent.Connected)
+            refreshPresence()
             if (fetchStarted.compareAndSet(false, true)) runPostConnectTasks()
         }
-        override fun onOwnName(name: String) { _events.value = LoginEvent.OwnNameUpdated(name) }
-        override fun onOwnAbout(about: String) { _events.value = LoginEvent.OwnAboutUpdated(about) }
-        override fun onOwnAvatarChanged(pictureID: String, removed: Boolean) { _events.value = LoginEvent.OwnAvatarChanged(removed) }
+        override fun onOwnName(name: String) { _events.tryEmit(LoginEvent.OwnNameUpdated(name)) }
+        override fun onOwnAbout(about: String) { _events.tryEmit(LoginEvent.OwnAboutUpdated(about)) }
+        override fun onOwnAvatarChanged(pictureID: String, removed: Boolean) { _events.tryEmit(LoginEvent.OwnAvatarChanged(removed)) }
         override fun onLoggedOut(reason: String) {
+            connected.set(false)
             fetchStarted.set(false)
-            _events.value = LoginEvent.LoggedOut(reason)
+            presenceOnline.set(false)
+            subscribed.clear()
+            _events.tryEmit(LoginEvent.LoggedOut(reason))
         }
-        override fun onError(msg: String) { _events.value = LoginEvent.Error(msg) }
+        override fun onError(msg: String) { _events.tryEmit(LoginEvent.Error(msg)) }
         override fun onMessageStatus(messageID: String, status: String) { ops.trySend(Op.Status(messageID, status)) }
 
         override fun onOfflineSyncPreview(total: Long, messages: Long, notifications: Long, receipts: Long) {
-            HistorySyncService.startOffline(appContext, total.toInt())
+            HistorySyncService.startOffline(appContext, messages.toInt())
         }
 
         override fun onOfflineSyncCompleted(count: Long) {
             ops.trySend(Op.OfflineDone)
         }
 
+        override fun onChannelEvent(kind: String, jid: String) {
+            scope.launch { syncChannels() }
+        }
+
         override fun onContactName(jid: String, name: String) {
-            scope.launch { db.contactDao().upsertName(jid, name) } // saved name wins
+            scope.launch { db.contactDao().upsertName(jid, name) }
+        }
+
+        override fun onChatRead(chatJid: String, timestamp: Long) {
+            ops.trySend(Op.ChatRead(chatJid, timestamp))
+        }
+
+        override fun onChatPresence(chatJid: String, senderJid: String, state: String, media: String) {
+            _events.tryEmit(LoginEvent.ChatPresenceUpdated(chatJid, senderJid, state, media))
+        }
+
+        override fun onPresence(senderJid: String, online: Boolean, lastSeen: Long) {
+            val key = presenceKey(senderJid)
+            val prevSeen = presenceCache[key]?.lastSeen ?: prefs.getLong("last_seen_$key", 0L)
+            val seen = if (lastSeen > 0L) lastSeen else prevSeen
+            if (lastSeen > 0L) prefs.edit().putLong("last_seen_$key", lastSeen).apply()
+            presenceCache[key] = PresenceInfo(online, seen)
+            _events.tryEmit(LoginEvent.PresenceUpdated(senderJid, online, lastSeen))
         }
 
         override fun onMessage(
@@ -193,6 +249,7 @@ class ChatSession(dbPath: String, context: Context) {
                         mediaKey = mediaKey ?: ByteArray(0),
                         mediaFileEncSha256 = fileEncSHA256 ?: ByteArray(0),
                         mediaFileSha256 = fileSHA256 ?: ByteArray(0),
+                        mediaFileLength = fileLength,
                         mediaThumbnail = thumbnail?.takeIf { it.isNotEmpty() },
                         mediaLocalPath = null
                     ),
@@ -256,11 +313,17 @@ class ChatSession(dbPath: String, context: Context) {
                             }
                             is Op.Status -> {
                                 flush(batch)
+                                applyHistory(history)   // NEW
                                 if (cur.status == "read_self") {
                                     db.messageDao().markReadUpTo(cur.id)
                                 } else {
                                     db.messageDao().setStatus(cur.id, cur.status)
                                 }
+                            }
+                            is Op.ChatRead -> {
+                                flush(batch)
+                                applyHistory(history)
+                                db.messageDao().markChatReadUpTo(cur.chatJid, cur.ts)
                             }
                             is Op.StatusMsg -> {
                                 flush(batch)
@@ -311,8 +374,6 @@ class ChatSession(dbPath: String, context: Context) {
                 val lastTry = existing?.avatarUpdatedAt ?: 0L
                 if (existingPath == null && lastTry > 0 &&
                     System.currentTimeMillis() - lastTry < 7L * 24 * 60 * 60 * 1000) continue
-
-                delay(300)
 
                 runCatching {
                     val url = client.getProfilePictureURL(jid)
@@ -393,7 +454,26 @@ class ChatSession(dbPath: String, context: Context) {
 
     private suspend fun flush(batch: ArrayList<Incoming>) {
         if (batch.isEmpty()) return
-        db.withTransaction { batch.forEach { db.messageDao().insert(it.entity) } }
+        db.withTransaction {
+            val existing = db.messageDao()
+                .localState(batch.map { it.entity.messageId })
+                .associateBy { it.messageId }
+            batch.forEach {
+                val e = it.entity
+                val old = existing[e.messageId]
+                when {
+                    old == null -> db.messageDao().insert(e)
+                    e.mediaType == null -> Unit
+                    else -> db.messageDao().insert(
+                        e.copy(
+                            isRead = old.isRead || e.isRead,
+                            mediaLocalPath = old.mediaLocalPath ?: e.mediaLocalPath,
+                            status = old.status
+                        )
+                    )
+                }
+            }
+        }
         saveNames(batch)
         HistorySyncService.reportOffline(batch.size)
         batch.clear()
@@ -445,14 +525,14 @@ class ChatSession(dbPath: String, context: Context) {
     fun allChatJids() = db.messageDao().allChatJids()
 
     fun beginQrLogin() {
-        try { client.startQrLogin() } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "qr_login_failed") }
+        try { client.startQrLogin() } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "qr_login_failed")) }
     }
     fun beginPairingLogin(phoneDigits: String) {
-        try { client.startPairingLogin(phoneDigits) } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "pairing_failed") }
+        try { client.startPairingLogin(phoneDigits) } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "pairing_failed")) }
     }
     fun isLoggedIn(): Boolean = client.isLoggedIn()
     fun reconnectIfNeeded() {
-        try { client.reconnect() } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "reconnect_failed") }
+        try { client.reconnect() } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "reconnect_failed")) }
     }
 
     fun logout(onComplete: (Boolean) -> Unit) {
@@ -479,7 +559,7 @@ class ChatSession(dbPath: String, context: Context) {
             prefs.edit().clear().apply()
             fetchStarted.set(false)
 
-            _events.value = LoginEvent.LoggedOut("user_requested")
+            _events.tryEmit(LoginEvent.LoggedOut("user_requested"))
             onComplete(serverOk)
         }
     }
@@ -501,8 +581,83 @@ class ChatSession(dbPath: String, context: Context) {
         return try {
             client.markChatRead(chatJid, messageIds.joinToString(","), senderJid)
             true
-        } catch (e: Exception) { false }
+        } catch (e: Exception) {
+            Log.w("ChatSession", "markChatRead failed for $chatJid: ${e.message}")
+            false
+        }
     }
+
+    fun setAppForeground(foreground: Boolean) {
+        appForeground.set(foreground)
+        refreshPresence()
+    }
+
+    fun refreshPresence() {
+        val immediate = !appForeground.get() || connected.get()
+        presenceJob?.cancel()
+        presenceJob = scope.launch {
+            if (!immediate) delay(1200)       // only cold start needs coalescing
+            repeat(5) { attempt ->
+                if (applyPresence().isSuccess) return@launch
+                delay((attempt + 1) * 1000L)
+            }
+        }
+    }
+
+    fun cachedPresence(jid: String): PresenceInfo? {
+        val key = presenceKey(jid)
+        presenceCache[key]?.let { return it }
+        val saved = prefs.getLong("last_seen_$key", 0L)
+        return if (saved > 0L) PresenceInfo(false, saved) else null
+    }
+
+    private suspend fun applyPresence(): Result<Unit> = runCatching {
+        if (!connected.get()) error("not connected yet")
+        presenceMutex.withLock {
+            val wantOnline = appForeground.get() &&
+                    settingsRepo.getBoolean("send_online_presence", true)
+            withContext(Dispatchers.IO) {
+                if (wantOnline && !presenceOnline.get()) {
+                    client.sendPresenceAvailable()
+                    presenceOnline.set(true)
+                } else if (!wantOnline && presenceOnline.get()) {
+                    client.sendPresenceUnavailable()
+                    presenceOnline.set(false)
+                    subscribed.clear()          // resubscribe once when back online
+                }
+                if (presenceOnline.get()) subscribeWatchedLocked()
+            }
+        }
+    }.onFailure {
+        if (it.message?.contains("not connected", ignoreCase = true) == true) {
+            connected.set(false)
+        }
+        Log.w("ChatSession", "applyPresence failed: ${it.message}")
+    }
+
+    private fun subscribeWatchedLocked() {
+        val jid = watchedJid ?: return
+        if (!subscribed.add(jid)) return
+        try {
+            client.subscribePresence(jid)
+        } catch (e: Exception) {
+            subscribed.remove(jid)
+            throw e
+        }
+    }
+
+    fun watchPresence(jid: String?) {
+        watchedJid = jid?.takeUnless { isGroupJID(it) || it.endsWith("@broadcast") || it.endsWith("@newsletter") }
+        if (watchedJid != null) refreshPresence()
+    }
+
+    fun sendChatPresence(chatJid: String, state: String, media: String = "") =
+        runCatching {
+            if (!presenceOnline.get()) return@runCatching
+            client.sendChatPresence(chatJid, state, media)
+        }.onFailure {
+            Log.w("ChatSession", "sendChatPresence failed for $chatJid: ${it.message}")
+        }
 
     fun sendMessage(chatJid: String, text: String, replyToId: String? = null, replyToSenderJid: String? = null, replyToText: String? = null): Boolean {
         val tempId = "local_${System.nanoTime()}"
@@ -530,7 +685,7 @@ class ChatSession(dbPath: String, context: Context) {
                     db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
                     db.messageDao().setStatus(realId, "sent")
                 }
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_failed")) }
         }
         return true
     }
@@ -555,7 +710,7 @@ class ChatSession(dbPath: String, context: Context) {
                 val realId = parts.getOrNull(0)
                 val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
                 if (realId != null && realTimestamp != null) db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_image_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_image_failed")) }
         }
         return true
     }
@@ -580,7 +735,7 @@ class ChatSession(dbPath: String, context: Context) {
                 val realId = parts.getOrNull(0)
                 val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
                 if (realId != null && realTimestamp != null) db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_video_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_video_failed")) }
         }
         return true
     }
@@ -631,7 +786,7 @@ class ChatSession(dbPath: String, context: Context) {
                         )
                     )
                 }
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_status_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_status_failed")) }
         }
         return true
     }
@@ -667,7 +822,7 @@ class ChatSession(dbPath: String, context: Context) {
                         )
                     )
                 }
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_image_status_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_image_status_failed")) }
         }
         return true
     }
@@ -703,7 +858,7 @@ class ChatSession(dbPath: String, context: Context) {
                         )
                     )
                 }
-            } catch (e: Exception) { _events.value = LoginEvent.Error(e.message ?: "send_video_status_failed") }
+            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_video_status_failed")) }
         }
         return true
     }
@@ -754,14 +909,150 @@ class ChatSession(dbPath: String, context: Context) {
             }
         }
     }
-    private fun enqueueAllAvatars() {
-        scope.launch {
-            db.messageDao().allChatJids().first().forEach { enqueueAvatar(it) }
-            db.contactDao().observeAll().first()
-                .filter { it.jid.endsWith("@g.us") }
-                .forEach { enqueueAvatar(it.jid) }
+
+    private var channelJob: Job? = null
+
+    private val channelFetchedAt = ConcurrentHashMap<String, Long>()
+    private val channelInfoAt = ConcurrentHashMap<String, Long>()
+
+    suspend fun refreshChannelInfo(jid: String) {
+        val last = channelInfoAt[jid] ?: 0L
+        if (System.currentTimeMillis() - last < 5 * 60_000L) return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val raw = client.getChannelInfoJSON(jid)
+                Log.i("ChatSession", "channel info: $raw")
+                val o = org.json.JSONObject(raw)
+                val old = db.channelDao().getByJid(jid)
+                db.channelDao().upsert(
+                    com.whatsgo.app.core.db.ChannelEntity(
+                        jid = jid,
+                        name = o.optString("name").ifBlank { old?.name ?: "Channel" },
+                        description = o.optString("description"),
+                        subscribers = o.optLong("subscribers"),
+                        verified = o.optBoolean("verified"),
+                        muted = o.optBoolean("muted")
+                    )
+                )
+                val pic = o.optString("pictureUrl")
+                if (pic.isNotBlank()) saveChannelAvatar(jid, pic)
+                channelInfoAt[jid] = System.currentTimeMillis()
+            }.onFailure { Log.w("ChatSession", "channel info failed: ${it.message}") }
         }
     }
+
+    private val _channelLoading = MutableStateFlow(false)
+    val channelLoading: StateFlow<Boolean> = _channelLoading
+
+    fun openChannel(jid: String) {
+        channelJob?.cancel()
+        channelJob = scope.launch {
+            // wait for Go connect (cold start). max ~20s
+            var waited = 0
+            while (isActive && !connected.get() && waited < 20_000) {
+                _channelLoading.value = true
+                delay(300); waited += 300
+            }
+
+            val stale = System.currentTimeMillis() - (channelFetchedAt[jid] ?: 0L) > 60_000L
+            if (stale) {
+                launch {
+                    _channelLoading.value = true
+                    var attempt = 0
+                    while (isActive && attempt < 3) {
+                        val ok = runCatching { client.loadChannelHistory(jid, 30L) }
+                            .onFailure { Log.w("ChatSession", "channel history failed: ${it.message}") }
+                            .isSuccess
+                        if (ok) { channelFetchedAt[jid] = System.currentTimeMillis(); break }
+                        attempt++
+                        delay(2000L * attempt)
+                    }
+                    _channelLoading.value = false
+                }
+            } else {
+                _channelLoading.value = false
+            }
+
+            while (isActive) {
+                val secs = runCatching { client.subscribeChannelLive(jid) }
+                    .onFailure { Log.w("ChatSession", "channel live failed: ${it.message}") }
+                    .getOrDefault(0L)
+                delay(if (secs > 15) (secs - 10) * 1000L else 30_000L)
+            }
+        }
+    }
+
+    fun closeChannel() {
+        channelJob?.cancel()
+        channelJob = null
+        _channelLoading.value = false
+    }
+
+    private suspend fun syncChannels() {
+        runCatching {
+            val json = withContext(Dispatchers.IO) { client.getSubscribedChannelsJSON() }
+            val arr = org.json.JSONArray(json)
+            val keep = ArrayList<String>(arr.length())
+            val pics = ArrayList<Pair<String, String>>()
+            db.withTransaction {
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val jid = o.optString("jid")
+                    if (jid.isBlank()) continue
+                    val name = o.optString("name").ifBlank { "Channel" }
+                    db.contactDao().upsertName(jid, name)
+                    val old = db.channelDao().getByJid(jid)
+                    db.channelDao().upsert(
+                        com.whatsgo.app.core.db.ChannelEntity(
+                            jid = jid, name = name,
+                            description = o.optString("description").ifBlank { old?.description ?: "" },
+                            subscribers = o.optLong("subscribers").takeIf { it > 0 } ?: old?.subscribers ?: 0L,
+                            verified = o.optBoolean("verified"),
+                            muted = o.optBoolean("muted")
+                        )
+                    )
+                    keep.add(jid)
+                    val pic = o.optString("pictureUrl")
+                    if (pic.isNotBlank()) pics.add(jid to pic)
+                }
+                db.channelDao().deleteNotIn(keep)
+            }
+            for ((jid, url) in pics) saveChannelAvatar(jid, url)
+
+            val missing = keep.filter { j ->
+                val p = db.contactDao().getByJid(j)?.avatarPath
+                p == null || !File(p).exists()
+            }.take(20)
+            if (missing.isNotEmpty()) {
+                scope.launch {
+                    for (j in missing) {
+                        refreshChannelInfo(j)
+                        delay(500)
+                    }
+                }
+            }
+        }.onFailure { Log.e("ChatSession", "syncChannels failed: ${it.message}") }
+    }
+
+    private suspend fun saveChannelAvatar(jid: String, url: String) {
+        val existing = db.contactDao().getByJid(jid)?.avatarPath
+        if (existing != null && File(existing).exists()) return
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val bytes = http.newCall(okhttp3.Request.Builder().url(url).build())
+                    .execute().use { r ->
+                        if (r.code != 200) error("avatar ${r.code}")
+                        r.body?.bytes() ?: error("empty")
+                    }
+                val dir = File(appContext.filesDir, "avatars").apply { mkdirs() }
+                val f = File(dir, jid.replace("@", "_at_").replace(".", "_dot_") + ".jpg")
+                f.writeBytes(bytes)
+                db.contactDao().updateAvatarPath(jid, f.absolutePath)
+            }.onFailure { Log.w("ChatSession", "channel avatar failed: ${it.message}") }
+        }
+    }
+
+
     private fun enqueueAvatar(jid: String) {
         if (jid.isBlank()) return
         if (jid.endsWith("@broadcast")) return
@@ -770,11 +1061,13 @@ class ChatSession(dbPath: String, context: Context) {
         avatarRefreshQueue.trySend(jid)
     }
 
+
     private fun runPostConnectTasks() {
         scope.launch {
             delay(3000)
             prefetchProfile()
             syncSavedContacts()
+            syncChannels()
             syncGroupsWithRetry()
         }
     }
@@ -824,5 +1117,73 @@ class ChatSession(dbPath: String, context: Context) {
                 )
             )
         }
+    }
+
+    private val groupInfoCache = ConcurrentHashMap<String, GroupInfoData>()
+
+    fun cachedGroupInfo(jid: String): GroupInfoData? = groupInfoCache[jid]
+
+    private suspend fun displayMember(jid: String, goName: String): String {
+        if (goName.isNotBlank()) return goName
+        db.contactDao().getName(jid)?.takeIf { it.isNotBlank() }?.let { return it }
+        return if (jid.endsWith("@lid")) "Unknown" else PhoneFormatter.format(appContext, jid)
+    }
+
+    suspend fun fetchGroupInfo(jid: String): GroupInfoData? = withContext(Dispatchers.IO) {
+        runCatching {
+            val o = org.json.JSONObject(client.getGroupInfoJSON(jid))
+            val own = client.getOwnJID().substringBefore(":").substringBefore("@")
+            val arr = o.optJSONArray("members") ?: org.json.JSONArray()
+            val members = ArrayList<GroupMember>(arr.length())
+            for (i in 0 until arr.length()) {
+                val m = arr.getJSONObject(i)
+                val mj = m.optString("jid")
+                val isMe = own.isNotBlank() && mj.substringBefore(":").substringBefore("@") == own
+                members.add(
+                    GroupMember(
+                        jid = mj,
+                        name = displayMember(mj, m.optString("name")),
+                        isAdmin = m.optBoolean("admin"),
+                        isSuperAdmin = m.optBoolean("superAdmin"),
+                        isMe = isMe
+                    )
+                )
+            }
+            members.sortWith(
+                compareByDescending<GroupMember> { it.isSuperAdmin }
+                    .thenByDescending { it.isAdmin }
+                    .thenBy { it.name.lowercase() }
+            )
+
+            val owner = o.optString("owner")
+            val topicBy = o.optString("topicSetBy")
+            val ownerName = if (owner.isBlank()) "" else
+                members.firstOrNull { it.jid == owner }?.name
+                    ?: displayMember(owner, runCatching { client.getContactName(owner) }.getOrDefault(""))
+            val topicByName = if (topicBy.isBlank()) "" else
+                members.firstOrNull { it.jid == topicBy }?.name
+                    ?: displayMember(topicBy, runCatching { client.getContactName(topicBy) }.getOrDefault(""))
+
+            val name = o.optString("name")
+            if (name.isNotBlank()) runCatching { db.contactDao().upsertName(jid, name) }
+
+            GroupInfoData(
+                jid = jid,
+                name = name,
+                description = o.optString("topic"),
+                descriptionBy = topicByName,
+                descriptionAt = o.optLong("topicSetAt"),
+                createdAt = o.optLong("created"),
+                createdBy = ownerName,
+                locked = o.optBoolean("locked"),
+                announce = o.optBoolean("announce"),
+                adminAddOnly = o.optBoolean("adminAddOnly"),
+                ephemeralSeconds = if (o.optBoolean("ephemeral")) o.optLong("timer") else 0L,
+                isCommunity = o.optBoolean("isParent"),
+                inviteLink = o.optString("invite"),
+                members = members
+            ).also { groupInfoCache[jid] = it }
+        }.onFailure { Log.w("ChatSession", "fetchGroupInfo failed: ${it.message}") }
+            .getOrNull()
     }
 }

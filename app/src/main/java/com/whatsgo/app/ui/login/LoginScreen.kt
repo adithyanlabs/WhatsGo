@@ -87,7 +87,7 @@ fun LoginScreen(
     LaunchedEffect(Unit) {
         runCatching { HistorySyncService.start(context) }
     }
-    val loginEvent by session.events.collectAsState()
+    val loginEvent by session.events.collectAsState(initial = LoginEvent.Idle)
 
     LaunchedEffect(loginEvent) {
         if (loginEvent is LoginEvent.Connected) {

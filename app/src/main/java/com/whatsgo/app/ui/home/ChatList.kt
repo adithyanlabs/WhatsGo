@@ -166,12 +166,14 @@ fun ChatRow(
             Spacer(modifier = Modifier.height(3.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
+                val isTyping = chat.lastMessage == "typing..." || chat.lastMessage == "recording audio..."
                 Text(
                     text = chat.lastMessage,
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (isTyping) FontWeight.Medium else FontWeight.Normal,
+                    color = if (isTyping) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
 

@@ -71,8 +71,13 @@ internal fun ConversationOverlay(
                 ConversationScreen(
                     chatJid = chat.id,
                     contactName = chat.name,
-                    contactStatus = if (chat.isOnline) "online" else "last seen recently",
+                    contactStatus = when {
+                        chat.isChannel -> "Channel"
+                        chat.isOnline -> "online"
+                        else -> ""
+                    },
                     contactAvatarPath = chat.avatarPath,
+                    readOnly = chat.isChannel,
                     onBack = onBack
                 )
             }

@@ -2,12 +2,14 @@ package com.whatsgo.app.ui.chat.models
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
 enum class MessageStatus { SENDING, SENT, DELIVERED, READ }
 enum class MediaType { IMAGE, VIDEO, VOICE, DOCUMENT, STICKER }
 
+@Immutable
 data class MediaAttachment(
     val type: MediaType,
     val urlOrPath: String,
@@ -21,7 +23,32 @@ data class MediaAttachment(
     val fileEncSha256: ByteArray? = null,
     val fileSha256: ByteArray? = null,
     val fileLength: Long? = null
-)
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is MediaAttachment) return false
+        return type == other.type &&
+                urlOrPath == other.urlOrPath &&
+                fileName == other.fileName &&
+                durationText == other.durationText &&
+                isDownloaded == other.isDownloaded &&
+                remoteUrl == other.remoteUrl &&
+                directPath == other.directPath &&
+                fileLength == other.fileLength &&
+                thumbnail.contentEquals(other.thumbnail) &&
+                mediaKey.contentEquals(other.mediaKey) &&
+                fileEncSha256.contentEquals(other.fileEncSha256) &&
+                fileSha256.contentEquals(other.fileSha256)
+    }
+
+    override fun hashCode(): Int {
+        var h = type.hashCode()
+        h = 31 * h + urlOrPath.hashCode()
+        h = 31 * h + isDownloaded.hashCode()
+        h = 31 * h + (thumbnail?.contentHashCode() ?: 0)
+        return h
+    }
+}
 
 data class ReplyPreview(
     val senderName: String,

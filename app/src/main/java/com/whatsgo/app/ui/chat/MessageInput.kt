@@ -35,6 +35,7 @@ fun MessageInput(
     onDismissReply: () -> Unit,
     onAttachClick: () -> Unit,
     onSend: (String) -> Unit,
+    onTyping: (String) -> Unit = {},
     onVoiceClick: () -> Unit = {}
 ) {
     var text by remember { mutableStateOf("") }
@@ -151,7 +152,10 @@ fun MessageInput(
 
                     BasicTextField(
                         value = text,
-                        onValueChange = { text = it },
+                        onValueChange = {
+                            text = it
+                            onTyping(it)
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .padding(vertical = 8.dp, horizontal = 4.dp),

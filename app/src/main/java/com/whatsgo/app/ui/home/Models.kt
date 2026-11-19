@@ -17,6 +17,7 @@ data class ChatItem(
     val isOnline: Boolean = false,
     val isPinned: Boolean = false,
     val isGroup: Boolean = false,
+    val isChannel: Boolean = false,
     val avatarPath: String? = null
 )
 
