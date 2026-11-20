@@ -6,6 +6,22 @@ val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
+val androidKeystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+val androidStorePassword = System.getenv("ANDROID_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val androidKeyAlias = System.getenv("ANDROID_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val androidKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val androidSigningEnvironment = listOf(
+    androidKeystoreFile,
+    androidStorePassword,
+    androidKeyAlias,
+    androidKeyPassword
+)
+val hasAndroidSigningEnvironment = androidSigningEnvironment.any { it != null }
+val completeAndroidSigningEnvironment = androidSigningEnvironment.all { it != null }
+check(!hasAndroidSigningEnvironment || completeAndroidSigningEnvironment) {
+    "Set all four ANDROID_* signing environment variables together."
+}
+val releaseSigningAvailable = keystorePropertiesFile.exists() || completeAndroidSigningEnvironment
 
 plugins {
     alias(libs.plugins.android.application)
@@ -36,6 +52,11 @@ android {
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
+            } else if (completeAndroidSigningEnvironment) {
+                storeFile = file(requireNotNull(androidKeystoreFile))
+                storePassword = requireNotNull(androidStorePassword)
+                keyAlias = requireNotNull(androidKeyAlias)
+                keyPassword = requireNotNull(androidKeyPassword)
             }
         }
     }
@@ -54,7 +75,7 @@ android {
 
     buildTypes {
         release {
-            if (keystorePropertiesFile.exists()) {
+            if (releaseSigningAvailable) {
                 signingConfig = signingConfigs.getByName("release")
             } else {
                 signingConfig = signingConfigs.getByName("debug")

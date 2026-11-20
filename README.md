@@ -27,7 +27,7 @@ For stable builds, see [GitHub Releases](https://github.com/adithyanlabs/WhatsGo
 
 The [WhatsGo Nightly release](https://github.com/adithyanlabs/WhatsGo/releases/tag/nightly) is rebuilt on every push to `main`. It keeps a single release and replaces the APK asset after each successful build. You can also run the workflow manually from [GitHub Actions](https://github.com/adithyanlabs/WhatsGo/actions).
 
-Nightly builds are for testing and may not install over the stable release. Removing an existing installation before installing a nightly build can erase that app's local data.
+Nightly builds are for testing and may contain unfinished changes.
 
 ## Build from source
 
