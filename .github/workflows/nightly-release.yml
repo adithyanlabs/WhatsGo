@@ -124,6 +124,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Download signed APK
         uses: actions/download-artifact@v8
         with:
