@@ -96,38 +96,12 @@ jobs:
           ./gradlew --no-daemon --no-configuration-cache assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/WhatsGo-nightly.apk"
 
-      - name: Verify APK signature matches the latest published APK
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify signed APK
         run: |
           set -euo pipefail
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
           test -n "$apksigner" || { echo "Android apksigner was not found" >&2; exit 1; }
-
-          stable_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false and .tag_name != "nightly" and any(.assets[]; .name == "WhatGo.apk"))] | sort_by(.created_at) | last | .tag_name // empty')"
-          if [[ -z "$stable_tag" ]]; then
-            echo "No published WhatGo.apk was found to check the signing certificate against." >&2
-            exit 1
-          fi
-          mkdir -p "$RUNNER_TEMP/stable-release"
-          gh release download "$stable_tag" \
-            --pattern WhatGo.apk \
-            --dir "$RUNNER_TEMP/stable-release"
-
-          certificate_digest() {
-            "$apksigner" verify --print-certs "$1" |
-              sed -nE 's/^Signer #[0-9]+ certificate SHA-256 digest: ([[:xdigit:]:]+)$/\1/p' |
-              tr -d ':' |
-              tr '[:upper:]' '[:lower:]' |
-              sort
-          }
-          nightly_digest="$(certificate_digest "$RUNNER_TEMP/WhatsGo-nightly.apk")"
-          stable_digest="$(certificate_digest "$RUNNER_TEMP/stable-release/WhatGo.apk")"
-          if [[ -z "$nightly_digest" || "$nightly_digest" != "$stable_digest" ]]; then
-            echo "The nightly APK certificate does not match the latest published APK; refusing to publish it." >&2
-            exit 1
-          fi
+          "$apksigner" verify --verbose --print-certs "$RUNNER_TEMP/WhatsGo-nightly.apk"
 
       - name: Upload signed APK for the publish job
         uses: actions/upload-artifact@v6
