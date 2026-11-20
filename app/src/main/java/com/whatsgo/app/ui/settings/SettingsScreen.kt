@@ -67,14 +67,6 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        CategoryCard(
-            icon = Icons.Filled.SystemUpdate,
-            title = "Check for updates",
-            subtitle = "Current version $appVersion",
-            onClick = { SettingsRegistry.actionHandlers["check_updates"]?.invoke() }
-        )
-        Spacer(Modifier.height(12.dp))
-
         Spacer(Modifier.height(16.dp))
 
         OutlinedButton(

@@ -34,6 +34,12 @@ object SettingsRegistry {
             title = "Appearance",
             subtitle = "Theme, colors and fonts",
             icon = Icons.Filled.Palette
+        ),
+        SettingsCategory(
+            id = "updates",
+            title = "Updates",
+            subtitle = "App updates and release channels",
+            icon = Icons.Filled.SystemUpdate
         )
     )
 
@@ -88,6 +94,23 @@ object SettingsRegistry {
                 SelectOption("light", "Light", Icons.Filled.LightMode),
                 SelectOption("dark", "Dark", Icons.Filled.DarkMode)
             )
+        ),
+        SettingDefinition(
+            id = "nightly_builds",
+            type = SettingType.TOGGLE,
+            title = "Nightly builds",
+            subtitle = "Receive updates from nightly releases (may be unstable)",
+            icon = Icons.Filled.Nightlight,
+            categoryId = "updates",
+            defaultValue = false
+        ),
+        SettingDefinition(
+            id = "check_updates",
+            type = SettingType.ACTION,
+            title = "Check for updates",
+            subtitle = "Check for app updates now",
+            icon = Icons.Filled.SystemUpdate,
+            categoryId = "updates"
         )
     )
 

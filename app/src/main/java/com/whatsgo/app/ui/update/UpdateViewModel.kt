@@ -7,6 +7,7 @@ import com.whatsgo.app.core.update.DownloadState
 import com.whatsgo.app.core.update.UpdateDownloadService
 import com.whatsgo.app.core.update.UpdateInfo
 import com.whatsgo.app.core.update.Updater
+import com.whatsgo.app.ui.settings.data.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ sealed interface UpdateState {
 
 class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     private val appContext = app.applicationContext
+    private val settingsRepo = SettingsRepository(appContext)
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
     private var job: Job? = null
@@ -52,6 +54,9 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
         check(manual = false)   // runs each time the app is opened
     }
 
+    private suspend fun isNightlyEnabled(): Boolean =
+        settingsRepo.getBoolean("nightly_builds", false)
+
     fun check(manual: Boolean) {
         val s = _state.value
         if (s is UpdateState.Available || s is UpdateState.Downloading || s is UpdateState.Ready) return
@@ -60,7 +65,8 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
         job = viewModelScope.launch {
             if (manual) _state.value = UpdateState.Checking
             try {
-                val info = Updater.fetchLatest(appContext)
+                val nightly = isNightlyEnabled()
+                val info = Updater.fetchLatest(appContext, nightly)
                 _state.value = when {
                     info != null -> UpdateState.Available(info)
                     manual -> UpdateState.UpToDate(Updater.currentVersion(appContext))

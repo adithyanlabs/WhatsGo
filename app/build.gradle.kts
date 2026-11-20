@@ -22,6 +22,8 @@ check(!hasAndroidSigningEnvironment || completeAndroidSigningEnvironment) {
     "Set all four ANDROID_* signing environment variables together."
 }
 val releaseSigningAvailable = keystorePropertiesFile.exists() || completeAndroidSigningEnvironment
+val appVersionName = "0.4.2-alpha"
+val nightlyBuildNumber = providers.gradleProperty("nightlyBuildNumber").orNull
 
 plugins {
     alias(libs.plugins.android.application)
@@ -39,8 +41,8 @@ android {
         applicationId = "com.whatsgo.app"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "0.4.1-alpha"
+        versionCode = 5
+        versionName = nightlyBuildNumber?.let { "$appVersionName.nightly.$it" } ?: appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

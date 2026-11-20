@@ -93,21 +93,57 @@ jobs:
             echo "::error::Add ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD Actions secrets."
             exit 1
           fi
-          ./gradlew --no-daemon --no-configuration-cache assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/WhatsGo-nightly.apk"
+          ./gradlew --no-daemon --no-configuration-cache \
+            -PnightlyBuildNumber="$GITHUB_RUN_NUMBER" \
+            assembleRelease
+          apk="app/build/outputs/apk/release/app-release.apk"
+          cp "$apk" "$RUNNER_TEMP/WhatsGo-nightly.apk"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt -print | sort -V | tail -n 1)"
+          test -n "$aapt" || { echo "Android aapt was not found" >&2; exit 1; }
+          version_name="$("$aapt" dump badging "$apk" | sed -nE "s/^package:.*versionName='([^']+)'.*/\1/p")"
+          test -n "$version_name" || { echo "Could not read the Nightly version name" >&2; exit 1; }
+          printf '%s\n' "$version_name" > "$RUNNER_TEMP/nightly-version.txt"
 
-      - name: Verify signed APK
+      - name: Verify signature and Nightly signing key continuity
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
           test -n "$apksigner" || { echo "Android apksigner was not found" >&2; exit 1; }
           "$apksigner" verify --verbose --print-certs "$RUNNER_TEMP/WhatsGo-nightly.apk"
 
+          certificate_digest() {
+            "$apksigner" verify --print-certs "$1" |
+              sed -nE 's/^Signer #[0-9]+ certificate SHA-256 digest: ([[:xdigit:]:]+)$/\1/p' |
+              tr -d ':' |
+              tr '[:upper:]' '[:lower:]' |
+              sort
+          }
+          new_digest="$(certificate_digest "$RUNNER_TEMP/WhatsGo-nightly.apk")"
+          test -n "$new_digest" || { echo "The Nightly APK has no signer certificate" >&2; exit 1; }
+
+          if gh release view nightly >/dev/null 2>&1; then
+            has_previous_apk="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
+              --jq 'any(.assets[]; .name == "WhatsGo-nightly.apk")')"
+            if [[ "$has_previous_apk" == "true" ]]; then
+              mkdir -p "$RUNNER_TEMP/previous-nightly"
+              gh release download nightly --pattern WhatsGo-nightly.apk --dir "$RUNNER_TEMP/previous-nightly"
+              old_digest="$(certificate_digest "$RUNNER_TEMP/previous-nightly/WhatsGo-nightly.apk")"
+              if [[ -z "$old_digest" || "$new_digest" != "$old_digest" ]]; then
+                echo "The Nightly signing certificate changed; refusing to publish an incompatible update." >&2
+                exit 1
+              fi
+            fi
+          fi
+
       - name: Upload signed APK for the publish job
         uses: actions/upload-artifact@v6
         with:
           name: signed-nightly-apk
-          path: ${{ runner.temp }}/WhatsGo-nightly.apk
+          path: |
+            ${{ runner.temp }}/WhatsGo-nightly.apk
+            ${{ runner.temp }}/nightly-version.txt
           if-no-files-found: error
           retention-days: 1
 
@@ -137,8 +173,12 @@ jobs:
 
       - name: Prepare nightly release notes
         run: |
+          NIGHTLY_VERSION_NAME="$(cat "$RUNNER_TEMP/nightly-version.txt")"
+          test -n "$NIGHTLY_VERSION_NAME" || { echo "Nightly version metadata is missing" >&2; exit 1; }
           cat > "$RUNNER_TEMP/nightly-notes.md" <<EOF
           Automated WhatsGo testing build from the latest commit on main.
+
+          Nightly version: $NIGHTLY_VERSION_NAME
 
           - Commit: $GITHUB_SHA
           - Built: $(date -u +'%Y-%m-%d %H:%M UTC')

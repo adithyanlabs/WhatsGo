@@ -14,6 +14,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import java.io.File
 import java.io.IOException
+import java.math.BigInteger
 
 data class UpdateInfo(
     val version: String,
@@ -24,7 +25,7 @@ data class UpdateInfo(
 
 object Updater {
     private const val RELEASES_URL =
-        "https://api.github.com/repos/adithyanlabs/WhatsGo/releases?per_page=5"
+        "https://api.github.com/repos/adithyanlabs/WhatsGo/releases?per_page=10"
 
     private val http = OkHttpClient()
 
@@ -32,7 +33,7 @@ object Updater {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
 
     /** Returns the newest release if it is newer than the installed version, else null. Throws on network errors. */
-    suspend fun fetchLatest(context: Context): UpdateInfo? = withContext(Dispatchers.IO) {
+    suspend fun fetchLatest(context: Context, includeNightly: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
             .url(RELEASES_URL)
             .header("Accept", "application/vnd.github+json")
@@ -43,6 +44,18 @@ object Updater {
             for (i in 0 until releases.length()) {
                 val r = releases.getJSONObject(i)
                 if (r.optBoolean("draft")) continue
+                val tag = r.optString("tag_name")
+                val isNightlyTag = tag.equals("nightly", ignoreCase = true)
+
+                // Nightly is an opt-in channel; alpha and beta releases stay available.
+                if (isNightlyTag && !includeNightly) continue
+
+                val version = if (isNightlyTag) {
+                    nightlyVersion(r.optString("body")) ?: continue
+                } else {
+                    tag
+                }
+
                 val assets = r.optJSONArray("assets") ?: continue
                 var apk: org.json.JSONObject? = null
                 for (j in 0 until assets.length()) {
@@ -50,14 +63,13 @@ object Updater {
                     if (a.optString("name").endsWith(".apk", ignoreCase = true)) { apk = a; break }
                 }
                 if (apk == null) continue
-                val tag = r.optString("tag_name")
                 val info = UpdateInfo(
-                    version = tag,
+                    version = version,
                     notes = cleanNotes(r.optString("body")),
                     apkUrl = apk.getString("browser_download_url"),
                     sizeBytes = apk.optLong("size", 0L)
                 )
-                return@withContext if (isNewer(tag, currentVersion(context))) info else null
+                if (compareVersions(version, currentVersion(context)) > 0) return@withContext info
             }
             null
         }
@@ -67,7 +79,6 @@ object Updater {
         withContext(Dispatchers.IO) {
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }
             val out = File(dir, "WhatsGo-${info.version}.apk")
-            if (out.exists() && info.sizeBytes > 0 && out.length() == info.sizeBytes) return@withContext out
 
             dir.listFiles()?.forEach { it.delete() }
             val tmp = File(dir, out.name + ".part")
@@ -116,20 +127,50 @@ object Updater {
         return true
     }
 
-    private fun isNewer(remote: String, local: String): Boolean {
-        val a = numbers(remote)
-        val b = numbers(local)
-        for (i in 0 until maxOf(a.size, b.size)) {
-            val x = a.getOrElse(i) { 0 }
-            val y = b.getOrElse(i) { 0 }
-            if (x != y) return x > y
+    private data class ParsedVersion(
+        val numbers: List<BigInteger>,
+        val prerelease: List<String>?
+    )
+
+    private fun nightlyVersion(notes: String): String? =
+        Regex("(?m)^Nightly version:\\s*(\\S+)\\s*$")
+            .find(notes)?.groupValues?.get(1)
+
+    private fun compareVersions(left: String, right: String): Int {
+        val a = parseVersion(left) ?: return 0
+        val b = parseVersion(right) ?: return 0
+
+        for (i in 0 until maxOf(a.numbers.size, b.numbers.size)) {
+            val order = a.numbers.getOrElse(i) { BigInteger.ZERO }
+                .compareTo(b.numbers.getOrElse(i) { BigInteger.ZERO })
+            if (order != 0) return order
         }
-        return false
+
+        if (a.prerelease == null) return if (b.prerelease == null) 0 else 1
+        if (b.prerelease == null) return -1
+        for (i in 0 until maxOf(a.prerelease.size, b.prerelease.size)) {
+            val x = a.prerelease.getOrNull(i) ?: return -1
+            val y = b.prerelease.getOrNull(i) ?: return 1
+            val xNumber = x.toBigIntegerOrNull()
+            val yNumber = y.toBigIntegerOrNull()
+            val order = when {
+                xNumber != null && yNumber != null -> xNumber.compareTo(yNumber)
+                xNumber != null -> -1
+                yNumber != null -> 1
+                else -> x.compareTo(y, ignoreCase = true)
+            }
+            if (order != 0) return order
+        }
+        return 0
     }
 
-    // "v0.2.1-alpha" -> [0, 2, 1]
-    private fun numbers(v: String): List<Int> =
-        Regex("\\d+").findAll(v.substringBefore('-')).map { it.value.toInt() }.toList()
+    private fun parseVersion(version: String): ParsedVersion? {
+        val match = Regex("^v?(\\d+(?:\\.\\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$")
+            .matchEntire(version.trim()) ?: return null
+        val numbers = match.groupValues[1].split('.').map { it.toBigIntegerOrNull() ?: return null }
+        val prerelease = match.groupValues[2].takeIf { it.isNotEmpty() }?.split('.')
+        return ParsedVersion(numbers, prerelease)
+    }
 
     private fun cleanNotes(md: String): String =
         md.lines().joinToString("\n") { l ->
