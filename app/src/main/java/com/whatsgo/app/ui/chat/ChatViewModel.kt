@@ -464,6 +464,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { session.sendVideoMessage(currentChatJid, localPath, caption, thumbnail) }
     }
 
+    fun sendDocument(localPath: String, fileName: String) {
+        if (currentChatJid.isEmpty()) return
+        viewModelScope.launch { session.sendDocumentMessage(currentChatJid, localPath, fileName) }
+    }
+
     fun sendSticker(sticker: StickerEntity) {
         val jid = currentChatJid
         if (jid.isNotEmpty()) viewModelScope.launch(Dispatchers.IO) { session.sendSticker(jid, sticker) }
@@ -528,6 +533,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "video" -> "mp4"
                 "voice", "audio" -> "ogg"
                 "sticker" -> "webp"
+                "document" -> {
+                    val mime = e.mediaMimetype ?: "application/octet-stream"
+                    when {
+                        mime.contains("pdf") -> "pdf"
+                        mime.contains("word") || mime.contains("docx") -> "docx"
+                        mime.contains("excel") || mime.contains("xlsx") -> "xlsx"
+                        mime.contains("powerpoint") || mime.contains("pptx") -> "pptx"
+                        mime.contains("text") -> "txt"
+                        else -> "bin"
+                    }
+                }
                 else -> "jpg"
             }
             val baseDir = if (mediaType == "sticker") File(getApplication<Application>().filesDir, "stickers").apply { mkdirs() }
