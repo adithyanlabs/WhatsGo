@@ -1,10 +1,8 @@
 name: Nightly Release
 
 on:
-  schedule:
-    # Run at 12:17 AM India time each day, away from the top of the hour.
-    - cron: '17 0 * * *'
-      timezone: Asia/Kolkata
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
