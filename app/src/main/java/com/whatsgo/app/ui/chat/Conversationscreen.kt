@@ -47,7 +47,6 @@ import com.whatsgo.app.core.db.AppDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOf
-import android.net.Uri
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -185,18 +184,6 @@ fun ConversationScreen(
         }
     }
 
-    val documentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { documentUri ->
-            val localPath = copyUriToCacheFile(context, documentUri, "bin")
-            if (localPath != null) {
-                val fileName = getFileNameFromUri(context, documentUri)
-                viewModel.sendDocument(localPath, fileName)
-            }
-        }
-    }
-
     val recording by viewModel.recording.collectAsState()
     val recordSeconds by viewModel.recordSeconds.collectAsState()
     val micPermission = rememberLauncherForActivityResult(
@@ -319,7 +306,6 @@ fun ConversationScreen(
                         MediaOption.GALLERY -> galleryLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                         )
-                        MediaOption.DOCUMENT -> documentLauncher.launch(arrayOf("*/*"))
                         else -> Unit
                     }
                 }
@@ -370,34 +356,6 @@ fun ConversationScreen(
             )
         }
 
-    }
-}
-
-private fun copyUriToCacheFile(context: android.content.Context, uri: Uri, extension: String): String? {
-    return try {
-        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-        val file = java.io.File(context.cacheDir, "share_${System.currentTimeMillis()}.$extension")
-        file.outputStream().use { output ->
-            inputStream.copyTo(output)
-        }
-        file.absolutePath
-    } catch (e: Exception) {
-        null
-    }
-}
-
-private fun getFileNameFromUri(context: android.content.Context, uri: Uri): String {
-    return try {
-        val cursor = context.contentResolver.query(uri, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) it.getString(nameIndex) ?: "document"
-                else "document"
-            } else "document"
-        } ?: "document"
-    } catch (e: Exception) {
-        "document"
     }
 }
 @Composable
@@ -510,33 +468,5 @@ private fun PulsingOnlineIndicator(
                 .background(color)
                 .scale(scale)
         )
-    }
-}
-
-private fun copyUriToCacheFile(context: android.content.Context, uri: Uri, extension: String): String? {
-    return try {
-        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-        val file = java.io.File(context.cacheDir, "share_${System.currentTimeMillis()}.$extension")
-        file.outputStream().use { output ->
-            inputStream.copyTo(output)
-        }
-        file.absolutePath
-    } catch (e: Exception) {
-        null
-    }
-}
-
-private fun getFileNameFromUri(context: android.content.Context, uri: Uri): String {
-    return try {
-        val cursor = context.contentResolver.query(uri, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                val nameIndex = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) it.getString(nameIndex) ?: "document"
-                else "document"
-            } else "document"
-        } ?: "document"
-    } catch (e: Exception) {
-        "document"
     }
 }

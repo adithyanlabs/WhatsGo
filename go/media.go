@@ -62,41 +62,6 @@ func (c *Client) SendAudioMessage(chatJid, filePath string, seconds int64, ptt b
 	return fmt.Sprintf("%s|%d", resp.ID, resp.Timestamp.Unix()), nil
 }
 
-func (c *Client) SendDocumentMessage(chatJid, filePath, fileName string) (string, error) {
-	if c.inner.Store.ID == nil {
-		return "", ErrNotLoggedInLocal
-	}
-	jid, err := types.ParseJID(chatJid)
-	if err != nil {
-		return "", err
-	}
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", err
-	}
-	uploaded, err := c.inner.Upload(context.Background(), data, whatsmeow.MediaDocument)
-	if err != nil {
-		return "", err
-	}
-	mimetype := http.DetectContentType(data)
-	doc := &waE2E.DocumentMessage{
-		URL:           proto.String(uploaded.URL),
-		DirectPath:    proto.String(uploaded.DirectPath),
-		MediaKey:      uploaded.MediaKey,
-		Mimetype:      proto.String(mimetype),
-		FileEncSHA256: uploaded.FileEncSHA256,
-		FileSHA256:    uploaded.FileSHA256,
-		FileLength:    proto.Uint64(uint64(len(data))),
-		FileName:      proto.String(fileName),
-	}
-	resp, err := c.inner.SendMessage(context.Background(), jid, &waE2E.Message{DocumentMessage: doc})
-	if err != nil {
-		c.log.Errorf("document send failed to %s: %v", chatJid, err)
-		return "", err
-	}
-	return fmt.Sprintf("%s|%d", resp.ID, resp.Timestamp.Unix()), nil
-}
-
 func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail []byte, mediaType whatsmeow.MediaType) (string, error) {
 	if c.inner.Store.ID == nil {
 		return "", ErrNotLoggedInLocal
@@ -191,11 +156,6 @@ func (c *Client) DownloadMedia(mediaType, url, directPath string, mediaKey, file
 		}
 	case "sticker":
 		downloadable = &waE2E.StickerMessage{
-			URL: proto.String(url), DirectPath: proto.String(directPath), MediaKey: mediaKey,
-			FileEncSHA256: fileEncSHA256, FileSHA256: fileSHA256, FileLength: proto.Uint64(uint64(fileLength)),
-		}
-	case "document":
-		downloadable = &waE2E.DocumentMessage{
 			URL: proto.String(url), DirectPath: proto.String(directPath), MediaKey: mediaKey,
 			FileEncSHA256: fileEncSHA256, FileSHA256: fileSHA256, FileLength: proto.Uint64(uint64(fileLength)),
 		}
