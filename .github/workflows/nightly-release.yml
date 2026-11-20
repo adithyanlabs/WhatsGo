@@ -1,0 +1,130 @@
+name: Nightly Release
+
+on:
+  schedule:
+    # Run at 12:17 AM India time each day, away from the top of the hour.
+    - cron: '17 0 * * *'
+      timezone: Asia/Kolkata
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    if: github.ref == 'refs/heads/main'
+    name: Build and update nightly APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'ndk;30.0.16248370'
+
+      - name: Install gomobile
+        run: |
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261011034528-197770444867
+          go_bin="$(go env GOPATH)/bin"
+          echo "$go_bin" >> "$GITHUB_PATH"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+          export PATH="$go_bin:$PATH"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
+          GOTOOLCHAIN=local gomobile init
+
+      - name: Build Go package and Android library
+        working-directory: go
+        run: |
+          GOTOOLCHAIN=local go build ./...
+          GOTOOLCHAIN=local gomobile bind \
+            -v \
+            -target=android/arm64 \
+            -androidapi 24 \
+            -ldflags="-s -w" \
+            -o ../app/libs/engine.aar \
+            .
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build debug APK
+        run: ./gradlew --no-daemon assembleDebug
+
+      - name: Name APK for the nightly release
+        run: cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/WhatsGo-nightly.apk"
+
+      - name: Prepare nightly release notes
+        run: |
+          cat > "$RUNNER_TEMP/nightly-notes.md" <<EOF
+          Automated WhatsGo testing build from the latest commit on main.
+
+          - Commit: $GITHUB_SHA
+          - Built: $(date -u +'%Y-%m-%d %H:%M UTC')
+
+          This debug build is for testing. It may not install over the stable release.
+          EOF
+
+      - name: Move nightly tag to this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref_endpoint="repos/${GITHUB_REPOSITORY}/git/ref/tags/nightly"
+          if gh api "$ref_endpoint" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/nightly" \
+              -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Create or update the nightly prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly \
+              --title "WhatsGo Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" \
+              --prerelease \
+              --latest=false
+          else
+            gh release create nightly \
+              --title "WhatsGo Nightly" \
+              --notes-file "$RUNNER_TEMP/nightly-notes.md" \
+              --prerelease \
+              --latest=false \
+              --verify-tag
+          fi
+
+      - name: Replace the nightly APK asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload nightly \
+            "$RUNNER_TEMP/WhatsGo-nightly.apk" \
+            --clobber

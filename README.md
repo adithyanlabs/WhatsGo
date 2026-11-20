@@ -23,9 +23,11 @@ WhatsGo is an experimental Android messaging client built with Kotlin, Jetpack C
 
 ## Download
 
-For release builds, see [GitHub Releases](https://github.com/adithyanlabs/WhatsGo/releases).
+For stable builds, see [GitHub Releases](https://github.com/adithyanlabs/WhatsGo/releases).
 
-Debug builds are available from successful [Android CI runs](https://github.com/adithyanlabs/WhatsGo/actions). Open a run and download its artifact from the **Artifacts** section. CI artifacts expire after 14 days.
+The [WhatsGo Nightly release](https://github.com/adithyanlabs/WhatsGo/releases/tag/nightly) is refreshed every night with the latest debug APK from `main`. It keeps a single release and replaces the APK asset on each successful build. You can also run the workflow manually from [GitHub Actions](https://github.com/adithyanlabs/WhatsGo/actions).
+
+Nightly builds are for testing and may not install over the stable release. Removing an existing installation before installing a nightly build can erase that app's local data.
 
 ## Build from source
 
