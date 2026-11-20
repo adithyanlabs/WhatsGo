@@ -115,7 +115,7 @@ jobs:
 
           certificate_digest() {
             "$apksigner" verify --print-certs "$1" |
-              sed -nE 's/^Signer #[0-9]+ certificate SHA-256 digest: ([[:xdigit:]:]+)$/\1/p' |
+              sed -nE 's/^(Signer #[0-9]+ |V[0-9]+ Signer: )certificate SHA-256 digest: ([[:xdigit:]:]+)$/\2/p' |
               tr -d ':' |
               tr '[:upper:]' '[:lower:]' |
               sort
