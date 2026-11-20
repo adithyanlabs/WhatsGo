@@ -1,6 +1,7 @@
 package com.whatsgo.app.core.db
 
 import androidx.room.Entity
+import androidx.room.ColumnInfo
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -37,5 +38,6 @@ data class MessageEntity(
     val mediaLocalPath: String? = null,
     val status: String = "sent",
     val mediaSeconds: Int? = null,
-    val mediaWaveform: ByteArray? = null
+    val mediaWaveform: ByteArray? = null,
+    @ColumnInfo(defaultValue = "0") val mediaAnimated: Boolean = false
 )

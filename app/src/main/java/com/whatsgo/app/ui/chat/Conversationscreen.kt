@@ -79,6 +79,9 @@ fun ConversationScreen(
     }.collectAsState(initial = null)
 
     val groupInfo by viewModel.groupInfo.collectAsState()
+    val favoriteStickers by viewModel.favoriteStickers.collectAsState()
+    val recentStickers by viewModel.recentStickers.collectAsState()
+    val receivedStickers by viewModel.receivedStickers.collectAsState()
 
     LaunchedEffect(chatJid, readOnly) {
         if (readOnly) SessionHolder.get(context).refreshChannelInfo(chatJid)
@@ -233,6 +236,12 @@ fun ConversationScreen(
             bottomBar = {
                 if (!readOnly) {
                     MessageInput(
+                        favoriteStickers = favoriteStickers,
+                        recentStickers = recentStickers,
+                        receivedStickers = receivedStickers,
+                        onStickerSend = viewModel::sendSticker,
+                        onStickerFavorite = viewModel::toggleFavoriteSticker,
+                        onStickerDownload = viewModel::downloadSticker,
                         replyingTo = replyingTo,
                         onDismissReply = { replyingTo = null },
                         isRecording = recording,

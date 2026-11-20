@@ -9,6 +9,7 @@ import com.whatsgo.app.core.SessionHolder
 import com.whatsgo.app.core.VoiceRecorder
 import com.whatsgo.app.core.db.AppDatabase
 import com.whatsgo.app.core.db.MessageRow
+import com.whatsgo.app.core.db.StickerEntity
 import com.whatsgo.app.ui.chat.models.ChatMessage
 import com.whatsgo.app.ui.chat.models.MediaAttachment
 import com.whatsgo.app.ui.chat.models.MediaType
@@ -22,6 +23,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -52,6 +55,7 @@ private class Page(
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
+    private val stickerDao = db.stickerDao()
     private val session = SessionHolder.get(app)
     private val settingsRepo = SettingsRepository(app)
     private val recorder = VoiceRecorder(app)
@@ -88,6 +92,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var hasMore = false
 
     private val nameCache = ConcurrentHashMap<String, String>()
+    private val stickerRequested: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    val favoriteStickers: StateFlow<List<StickerEntity>> = stickerDao.observeFavorites().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val recentStickers: StateFlow<List<StickerEntity>> = stickerDao.observeRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val receivedStickers: StateFlow<List<StickerEntity>> = stickerDao.observeReceived().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     private val resolving: MutableSet<String> = ConcurrentHashMap.newKeySet()
     @Volatile private var ownUser = ""
 
@@ -159,6 +167,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 .collect { page ->
                     hasMore = page.count >= page.limit
                     _messages.value = page.items
+                    page.items.filter { it.media?.type == MediaType.STICKER && !it.media.isDownloaded }
+                        .forEach { if (stickerRequested.add(it.messageId)) downloadMedia(it) }
                     if (page.hasUnread && currentChatJid == chatJid) markIncomingAsRead(chatJid)
                 }
         }
@@ -237,13 +247,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 type = when (type) {
                     "video" -> MediaType.VIDEO
                     "voice", "audio" -> MediaType.VOICE
+                    "sticker" -> MediaType.STICKER
                     else -> MediaType.IMAGE
                 },
                 urlOrPath = mediaLocalPath ?: "",
                 isDownloaded = mediaLocalPath != null,
                 thumbnail = mediaThumbnail,
                 durationText = mediaSeconds?.let { "%d:%02d".format(it / 60, it % 60) },
-                waveform = mediaWaveform
+                waveform = mediaWaveform,
+                animated = mediaAnimated ?: false
             )
         }
 
@@ -452,6 +464,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { session.sendVideoMessage(currentChatJid, localPath, caption, thumbnail) }
     }
 
+    fun sendSticker(sticker: StickerEntity) {
+        val jid = currentChatJid
+        if (jid.isNotEmpty()) viewModelScope.launch(Dispatchers.IO) { session.sendSticker(jid, sticker) }
+    }
+
+    fun toggleFavoriteSticker(sticker: StickerEntity) {
+        viewModelScope.launch(Dispatchers.IO) { stickerDao.setFavorite(sticker.id, !sticker.isFavorite) }
+    }
+
+    fun downloadSticker(sticker: StickerEntity) = session.downloadSticker(sticker)
+
     fun startRecording(): Boolean {
         if (_recording.value || currentChatJid.isEmpty()) return false
         if (!recorder.start(viewModelScope)) return false
@@ -504,9 +527,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val ext = when (mediaType) {
                 "video" -> "mp4"
                 "voice", "audio" -> "ogg"
+                "sticker" -> "webp"
                 else -> "jpg"
             }
-            val outFile = File(getApplication<Application>().cacheDir, "dl_${e.messageId}.$ext")
+            val baseDir = if (mediaType == "sticker") File(getApplication<Application>().filesDir, "stickers").apply { mkdirs() }
+                else getApplication<Application>().cacheDir
+            val outFile = File(baseDir, "dl_${e.messageId}.$ext")
             runCatching {
                 session.downloadMedia(
                     mediaType = mediaType,

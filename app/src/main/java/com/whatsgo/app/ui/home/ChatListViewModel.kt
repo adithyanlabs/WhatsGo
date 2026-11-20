@@ -157,7 +157,7 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
         val body = when (s.mediaType) {
             "image" -> "Image"
             "video" -> "Video"
-            "voice", "audio" -> "🎤 Voice message"
+            "voice", "audio" -> "Voice message"
             else -> s.lastMessage
         }
 

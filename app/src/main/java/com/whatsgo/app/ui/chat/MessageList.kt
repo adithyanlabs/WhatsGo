@@ -36,6 +36,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import com.whatsgo.app.ui.chat.models.*
 import androidx.compose.foundation.clickable
+import com.whatsgo.app.ui.chat.StickerImage
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.border
 import androidx.compose.animation.core.animateFloatAsState
@@ -432,7 +433,10 @@ fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, on
             }
         }
         MediaType.STICKER -> {
-            Icon(Icons.Filled.EmojiEmotions, null, modifier = Modifier.size(96.dp), tint = contentColor)
+            StickerImage(
+                path = if (media.isDownloaded && media.urlOrPath.isNotBlank()) media.urlOrPath else null,
+                modifier = Modifier.size(160.dp)
+            )
         }
     }
 }

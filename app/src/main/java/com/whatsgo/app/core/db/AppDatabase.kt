@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactEntity::class,
         StatusEntity::class,
         StatusViewerEntity::class,
-        ChannelEntity::class
+        ChannelEntity::class,
+        StickerEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
     abstract fun statusDao(): StatusDao
     abstract fun channelDao(): ChannelDao
+    abstract fun stickerDao(): StickerDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -68,6 +70,16 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN mediaAnimated INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `stickers` (`id` TEXT NOT NULL, `url` TEXT NOT NULL, `directPath` TEXT NOT NULL, `mediaKey` BLOB NOT NULL, `fileEncSha256` BLOB NOT NULL, `fileSha256` BLOB NOT NULL, `fileLength` INTEGER NOT NULL, `mimetype` TEXT NOT NULL, `animated` INTEGER NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `localPath` TEXT, `isFavorite` INTEGER NOT NULL, `lastUsed` INTEGER NOT NULL, `receivedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_stickers_isFavorite` ON `stickers` (`isFavorite`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_stickers_lastUsed` ON `stickers` (`lastUsed`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_stickers_receivedAt` ON `stickers` (`receivedAt`)")
+            }
+        }
+
         fun get(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -75,7 +87,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "whatsgo_messages.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(true)
                     .build().also { instance = it }
             }

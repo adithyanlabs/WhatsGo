@@ -1,5 +1,6 @@
 package com.whatsgo.app.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -24,9 +25,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.whatsgo.app.ui.chat.models.ChatMessage
+import com.whatsgo.app.core.db.StickerEntity
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,7 +44,13 @@ fun MessageInput(
     recordSeconds: Int = 0,
     onVoiceStart: () -> Unit = {},
     onVoiceCancel: () -> Unit = {},
-    onVoiceSend: () -> Unit = {}
+    onVoiceSend: () -> Unit = {},
+    favoriteStickers: List<StickerEntity> = emptyList(),
+    recentStickers: List<StickerEntity> = emptyList(),
+    receivedStickers: List<StickerEntity> = emptyList(),
+    onStickerSend: (StickerEntity) -> Unit = {},
+    onStickerFavorite: (StickerEntity) -> Unit = {},
+    onStickerDownload: (StickerEntity) -> Unit = {}
 ) {
     var text by remember { mutableStateOf("") }
     val isSendActive = text.isNotBlank()
@@ -54,6 +64,11 @@ fun MessageInput(
 
     val cs = MaterialTheme.colorScheme
     val showSend = isSendActive || isRecording
+    var panelOpen by remember { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(isFocused) { if (isFocused) panelOpen = false }
+    BackHandler(enabled = panelOpen) { panelOpen = false }
 
     Column(
         modifier = Modifier
@@ -167,11 +182,15 @@ fun MessageInput(
                             .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(
-                            onClick = { /* TODO: Emoji picker */ },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(Icons.Filled.EmojiEmotions, "Emoji", tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                        IconButton(onClick = {
+                            if (panelOpen) panelOpen = false else {
+                                keyboard?.hide()
+                                focusManager.clearFocus()
+                                panelOpen = true
+                            }
+                        }, modifier = Modifier.size(40.dp)) {
+                            Icon(if (panelOpen) Icons.Filled.Keyboard else Icons.Filled.EmojiEmotions,
+                                "Emoji and stickers", tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
                         }
 
                         BasicTextField(
@@ -253,6 +272,16 @@ fun MessageInput(
                     )
                 }
             }
+        }
+        AnimatedVisibility(
+            visible = panelOpen && !isRecording,
+            enter = expandVertically(animationSpec = spring()) + fadeIn(spring()),
+            exit = shrinkVertically(animationSpec = spring()) + fadeOut(spring())
+        ) {
+            EmojiStickerPanel(favorites = favoriteStickers, recent = recentStickers, received = receivedStickers,
+                onEmoji = { text += it; onTyping(text) },
+                onSticker = { onStickerSend(it); panelOpen = false },
+                onFavorite = onStickerFavorite, onDownload = onStickerDownload)
         }
     }
 }

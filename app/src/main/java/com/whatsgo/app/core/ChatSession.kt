@@ -9,6 +9,7 @@ import com.whatsgo.app.core.db.ContactEntity
 import com.whatsgo.app.core.db.MessageEntity
 import com.whatsgo.app.core.db.StatusEntity
 import com.whatsgo.app.core.db.StatusViewerEntity
+import com.whatsgo.app.core.db.StickerEntity
 import com.whatsgo.app.ui.chat.models.ReplyPreview
 import engine.Client
 import engine.Engine
@@ -108,6 +109,7 @@ class ChatSession(dbPath: String, context: Context) {
     private val ops = Channel<Op>(Channel.UNLIMITED)
     private val avatarRefreshQueue = Channel<String>(Channel.UNLIMITED)
     private val avatarQueued: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val stickerDownloading: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     private val subscribed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     @Volatile private var watchedJid: String? = null
@@ -289,6 +291,28 @@ class ChatSession(dbPath: String, context: Context) {
                 )
             ))
         }
+
+        override fun onStickerMessage(
+            chatJid: String, senderJid: String, messageId: String, timestamp: Long, fromMe: Boolean,
+            url: String, directPath: String, mediaKey: ByteArray?, fileEncSHA256: ByteArray?, fileSHA256: ByteArray?,
+            fileLength: Long, mimetype: String, animated: Boolean, width: Long, height: Long,
+            quotedId: String, quotedText: String, quotedSenderJid: String, senderPushName: String
+        ) {
+            ops.trySend(Op.Msg(Incoming(MessageEntity(
+                messageId = messageId, chatJid = chatJid, senderJid = senderJid, text = "", timestamp = timestamp,
+                fromMe = fromMe, isRead = fromMe, quotedId = quotedId.ifBlank { null }, quotedText = quotedText.ifBlank { null },
+                quotedSenderJid = quotedSenderJid.ifBlank { null }, mediaType = "sticker", mediaMimetype = mimetype,
+                mediaUrl = url, mediaDirectPath = directPath, mediaKey = mediaKey ?: ByteArray(0),
+                mediaFileEncSha256 = fileEncSHA256 ?: ByteArray(0), mediaFileSha256 = fileSHA256 ?: ByteArray(0),
+                mediaFileLength = fileLength, mediaAnimated = animated
+            ), chatJid, senderJid, fromMe, senderPushName)))
+            if (!fromMe) saveSticker(url, directPath, mediaKey, fileEncSHA256, fileSHA256, fileLength, mimetype, animated, width, height, false)
+        }
+
+        override fun onFavoriteSticker(
+            url: String, directPath: String, mediaKey: ByteArray?, fileEncSHA256: ByteArray?,
+            fileLength: Long, mimetype: String, animated: Boolean, width: Long, height: Long
+        ) = saveSticker(url, directPath, mediaKey, fileEncSHA256, null, fileLength, mimetype, animated, width, height, true)
 
         override fun onStatusMessage(
             statusID: String, senderJID: String, senderName: String, timestamp: Long,
@@ -827,9 +851,78 @@ class ChatSession(dbPath: String, context: Context) {
     ): Boolean {
         return try {
             client.downloadMedia(mediaType, url, directPath, mediaKey, fileEncSha256, fileSha256, fileLength, outPath)
-            scope.launch { db.messageDao().setLocalPath(messageId, outPath) }
+            scope.launch {
+                db.messageDao().setLocalPath(messageId, outPath)
+                if (mediaType == "sticker") db.stickerDao().setLocalPath(fileEncSha256.toHex(), outPath)
+            }
             true
         } catch (e: Exception) { false }
+    }
+
+    private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+
+    private fun saveSticker(
+        url: String, directPath: String, mediaKey: ByteArray?, encSha: ByteArray?, sha: ByteArray?,
+        fileLength: Long, mimetype: String, animated: Boolean, width: Long, height: Long, favorite: Boolean
+    ) {
+        if (encSha == null || encSha.isEmpty()) return
+        val id = encSha.toHex()
+        scope.launch {
+            runCatching {
+                db.stickerDao().insertIgnore(StickerEntity(
+                    id, url, directPath, mediaKey ?: ByteArray(0), encSha, sha ?: ByteArray(0), fileLength,
+                    mimetype.ifBlank { "image/webp" }, animated, width.toInt(), height.toInt(),
+                    isFavorite = favorite, receivedAt = System.currentTimeMillis()
+                ))
+                if (favorite) db.stickerDao().setFavorite(id, true)
+            }.onFailure { Log.w("ChatSession", "saveSticker failed", it) }
+        }
+    }
+
+    private suspend fun ensureStickerFile(sticker: StickerEntity): String? {
+        sticker.localPath?.let { if (File(it).exists()) return it }
+        val dir = File(appContext.filesDir, "stickers").apply { mkdirs() }
+        val file = File(dir, "${sticker.id}.webp")
+        if (!file.exists() || file.length() == 0L) {
+            val ok = downloadMedia("sticker", sticker.url, sticker.directPath, sticker.mediaKey,
+                sticker.fileEncSha256, sticker.fileSha256, sticker.fileLength, "sticker_${sticker.id}", file.absolutePath)
+            if (!ok) return null
+        }
+        db.stickerDao().setLocalPath(sticker.id, file.absolutePath)
+        return file.absolutePath
+    }
+
+    fun downloadSticker(sticker: StickerEntity) {
+        if (!stickerDownloading.add(sticker.id)) return
+        scope.launch { try { ensureStickerFile(sticker) } finally { stickerDownloading.remove(sticker.id) } }
+    }
+
+    fun sendSticker(chatJid: String, sticker: StickerEntity): Boolean {
+        scope.launch {
+            val path = ensureStickerFile(sticker)
+            if (path == null) { _events.tryEmit(LoginEvent.Error("sticker_unavailable")); return@launch }
+            val info = StickerFiles.info(path)
+            val tempId = "local_${System.nanoTime()}"
+            val now = System.currentTimeMillis() / 1000
+            db.messageDao().insert(MessageEntity(messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
+                text = "", timestamp = now, fromMe = true, isRead = true, mediaType = "sticker", mediaMimetype = "image/webp",
+                mediaLocalPath = path, mediaAnimated = info.animated, status = "sending"))
+            try {
+                val result = client.sendStickerMessage(chatJid, path, info.animated, info.width.toLong(), info.height.toLong())
+                val parts = result.split("|")
+                val realId = parts.getOrNull(0)
+                val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
+                if (realId != null && realTimestamp != null) {
+                    db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
+                    db.messageDao().setStatus(realId, "sent")
+                }
+                db.stickerDao().touch(sticker.id, System.currentTimeMillis())
+            } catch (e: Exception) {
+                db.messageDao().setStatus(tempId, "failed")
+                _events.tryEmit(LoginEvent.Error(e.message ?: "send_sticker_failed"))
+            }
+        }
+        return true
     }
 
     fun observeStatuses(): Flow<List<StatusEntity>> = db.statusDao().observeAll()

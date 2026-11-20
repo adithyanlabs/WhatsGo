@@ -154,6 +154,11 @@ func (c *Client) DownloadMedia(mediaType, url, directPath string, mediaKey, file
 			FileSHA256:    fileSHA256,
 			FileLength:    proto.Uint64(uint64(fileLength)),
 		}
+	case "sticker":
+		downloadable = &waE2E.StickerMessage{
+			URL: proto.String(url), DirectPath: proto.String(directPath), MediaKey: mediaKey,
+			FileEncSHA256: fileEncSHA256, FileSHA256: fileSHA256, FileLength: proto.Uint64(uint64(fileLength)),
+		}
 	default:
 		return fmt.Errorf("unsupported media type: %s", mediaType)
 	}
