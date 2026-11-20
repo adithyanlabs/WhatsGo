@@ -1146,31 +1146,73 @@ class ChatSession(dbPath: String, context: Context) {
         return if (jid.endsWith("@lid")) "Unknown" else PhoneFormatter.format(appContext, jid)
     }
 
+    private class ResolvedMember(val name: String, val kind: Int)
+
+    private fun resolveMember(
+        jid: String,
+        goName: String,
+        saved: Boolean,
+        dbNames: Map<String, String>
+    ): ResolvedMember {
+        if (goName.isNotBlank() && !PhoneFormatter.isPhoneLike(goName)) {
+            return ResolvedMember(goName, if (saved) 2 else 3)
+        }
+        dbNames[jid]?.takeIf { it.isNotBlank() && !PhoneFormatter.isPhoneLike(it) }?.let {
+            return ResolvedMember(it, 3)
+        }
+        val shown = if (jid.endsWith("@lid")) "Unknown" else PhoneFormatter.format(appContext, jid)
+        return ResolvedMember(shown, 4)
+    }
+
     suspend fun fetchGroupInfo(jid: String): GroupInfoData? = withContext(Dispatchers.IO) {
         runCatching {
             val o = org.json.JSONObject(client.getGroupInfoJSON(jid))
             val own = client.getOwnJID().substringBefore(":").substringBefore("@")
             val arr = o.optJSONArray("members") ?: org.json.JSONArray()
-            val members = ArrayList<GroupMember>(arr.length())
+
+            val dbNames = HashMap<String, String>()
+            (0 until arr.length())
+                .map { arr.getJSONObject(it).optString("jid") }
+                .chunked(500)
+                .forEach { chunk ->
+                    db.contactDao().namesFor(chunk).forEach { dbNames[it.jid] = it.name }
+                }
+
+            val rows = ArrayList<Triple<GroupMember, Int, Long>>(arr.length())
             for (i in 0 until arr.length()) {
                 val m = arr.getJSONObject(i)
                 val mj = m.optString("jid")
-                val isMe = own.isNotBlank() && mj.substringBefore(":").substringBefore("@") == own
-                members.add(
-                    GroupMember(
-                        jid = mj,
-                        name = displayMember(mj, m.optString("name")),
-                        isAdmin = m.optBoolean("admin"),
-                        isSuperAdmin = m.optBoolean("superAdmin"),
-                        isMe = isMe
+                val user = mj.substringBefore(":").substringBefore("@")
+                val isMe = own.isNotBlank() && user == own
+                val admin = m.optBoolean("admin")
+                val superAdmin = m.optBoolean("superAdmin")
+                val r = resolveMember(mj, m.optString("name"), m.optBoolean("saved"), dbNames)
+                val tier = when {
+                    isMe -> 0
+                    admin || superAdmin -> 1
+                    else -> r.kind
+                }
+                rows.add(
+                    Triple(
+                        GroupMember(
+                            jid = mj,
+                            name = r.name,
+                            isAdmin = admin,
+                            isSuperAdmin = superAdmin,
+                            isMe = isMe
+                        ),
+                        tier,
+                        user.toLongOrNull() ?: Long.MAX_VALUE
                     )
                 )
             }
-            members.sortWith(
-                compareByDescending<GroupMember> { it.isSuperAdmin }
-                    .thenByDescending { it.isAdmin }
-                    .thenBy { it.name.lowercase() }
+            rows.sortWith(
+                compareBy<Triple<GroupMember, Int, Long>> { it.second }
+                    .thenByDescending { it.second == 1 && it.first.isSuperAdmin }
+                    .thenBy { if (it.second == 4) "" else it.first.name.lowercase() }
+                    .thenBy { it.third }
             )
+            val members = ArrayList(rows.map { it.first })
 
             val owner = o.optString("owner")
             val topicBy = o.optString("topicSetBy")

@@ -44,6 +44,15 @@ import com.whatsgo.app.core.db.AppDatabase
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.flowOf
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.material.icons.filled.Person
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ConversationScreen(
@@ -95,7 +104,7 @@ fun ConversationScreen(
     val liveSubtitle by viewModel.presenceSubtitle.collectAsState()
     val channelStatus = channel?.let { "Channel · ${formatCount(it.subscribers)} followers" }
     val groupStatus = groupInfo?.let { "${it.memberCount} members" }
-    val displayStatus = liveSubtitle ?: channelStatus ?: groupStatus ?: contactStatus
+    val displayStatus = liveSubtitle ?: channelStatus ?: groupStatus ?: ""
     val isOnline = displayStatus.equals("online", ignoreCase = true) ||
             displayStatus.startsWith("typing", ignoreCase = true) ||
             displayStatus.startsWith("recording", ignoreCase = true)
@@ -140,8 +149,12 @@ fun ConversationScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
-        if (listState.firstVisibleItemIndex < 2) {
+    val newest = messages.firstOrNull()
+    val newestId = newest?.messageId
+    val newestIsMine = newest?.isMine == true
+
+    LaunchedEffect(newestId) {
+        if (newestId != null && (newestIsMine || listState.firstVisibleItemIndex < 2)) {
             listState.animateScrollToItem(0)
         }
     }
@@ -357,11 +370,11 @@ fun ConversationTopBar(
                                 .background(cs.secondaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                profile.avatarLetter,
-                                color = cs.onSecondaryContainer,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
+                            Icon(
+                                Icons.Filled.Person,
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp),
+                                tint = cs.onSecondaryContainer
                             )
                         }
                     }
@@ -374,9 +387,18 @@ fun ConversationTopBar(
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                Column {
+                var lastStatus by remember { mutableStateOf("") }
+                if (profile.statusText.isNotBlank()) lastStatus = profile.statusText
+
+                Column(modifier = Modifier.animateContentSize()) {
                     Text(profile.name, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(profile.statusText, fontSize = 13.sp, color = if (profile.isOnline) cs.primary else cs.onSurfaceVariant)
+                    AnimatedVisibility(
+                        visible = profile.statusText.isNotBlank(),
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        Text(lastStatus, fontSize = 13.sp, color = if (profile.isOnline) cs.primary else cs.onSurfaceVariant)
+                    }
                 }
             }
             IconButton(onClick = { /* TODO: Open More Menu */ }, modifier = Modifier.size(48.dp)) {

@@ -276,7 +276,7 @@ private fun ReplySnippet(reply: ReplyPreview, isMine: Boolean) {
 private val ReadTickBlue = androidx.compose.ui.graphics.Color(0xFF34B7F1)
 
 @Composable
-private fun StatusDot(status: MessageStatus, isMine: Boolean, modifier: Modifier = Modifier) {
+fun StatusDot(status: MessageStatus, isMine: Boolean, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val baseColor = cs.onPrimaryContainer
 

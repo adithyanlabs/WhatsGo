@@ -49,6 +49,7 @@ fun ChatAppRoot() {
     val updatesViewModel: UpdatesViewModel = viewModel()
     val updateViewModel: UpdateViewModel = viewModel()
     val chats by chatListViewModel.chats.collectAsState()
+    val unreadChats by chatListViewModel.unreadChats.collectAsState()
     val allStatuses by updatesViewModel.allStatuses.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val session = remember { com.whatsgo.app.core.SessionHolder.get(context) }
@@ -82,6 +83,7 @@ fun ChatAppRoot() {
 
         val allChatsListState = rememberLazyListState()
         val groupsListState = rememberLazyListState()
+        val unreadListState = rememberLazyListState()
 
         val channelChats by chatListViewModel.channels.collectAsState()
         val channelsListState = rememberLazyListState()
@@ -284,7 +286,14 @@ fun ChatAppRoot() {
                                                 onChatClick = { selectedChat = it },
                                                 onAvatarNeeded = { }
                                             )
-                                            else -> EmptyTabPlaceholder(tabs[innerPage])
+
+                                            TopTab.UNREAD -> ChatList(
+                                                chats = unreadChats,
+                                                listState = unreadListState,
+                                                bottomPadding = FloatingNavClearance,
+                                                onChatClick = { selectedChat = it },
+                                                onAvatarNeeded = { session.requestAvatarRefresh(it) }
+                                            )
                                         }
                                     }
 

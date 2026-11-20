@@ -23,10 +23,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
-
+import com.whatsgo.app.ui.chat.models.MessageStatus
+import kotlinx.coroutines.flow.map
 @OptIn(FlowPreview::class)
 class ChatListViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
@@ -43,6 +43,9 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
         .shareIn(viewModelScope, SharingStarted.Eagerly, 1)
     private val _chats = MutableStateFlow<List<ChatItem>>(emptyList())
     val chats: StateFlow<List<ChatItem>> = _chats.asStateFlow()
+    val unreadChats: StateFlow<List<ChatItem>> = chats
+        .map { list -> list.filter { it.unread > 0 && !it.isChannel } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val channels: StateFlow<List<ChatItem>> = combine(
         db.channelDao().observeAll(),
         summariesFlow,
@@ -104,6 +107,7 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
                     val typingText = typingMap[key]
                     item.copy(
                         lastMessage = typingText ?: item.lastMessage,
+                        lastStatus = if (typingText != null) null else item.lastStatus,
                         isOnline = presenceMap[key] == true
                     )
                 }
@@ -149,15 +153,40 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
             saved != null -> saved
             else -> resolveName(s.chatJid)
         }
+
+        val body = when (s.mediaType) {
+            "image" -> "Image"
+            "video" -> "Video"
+            else -> s.lastMessage
+        }
+
+        val lastText = when {
+            !isGroup -> body
+            s.fromMe -> "You: $body"
+            else -> {
+                val who = s.senderName?.takeIf { it.isNotBlank() && !PhoneFormatter.isPhoneLike(it) }
+                    ?: withContext(Dispatchers.Default) { PhoneFormatter.format(getApplication(), s.senderJid) }
+                "$who: $body"
+            }
+        }
+
+        val lastStatus = if (s.fromMe) when (s.status) {
+            "read" -> MessageStatus.READ
+            "delivered" -> MessageStatus.DELIVERED
+            "sending" -> MessageStatus.SENDING
+            else -> MessageStatus.SENT
+        } else null
+
         return ChatItem(
             id = s.chatJid,
             name = name,
-            lastMessage = if (s.fromMe) "You: ${s.lastMessage}" else s.lastMessage,
+            lastMessage = lastText,
             time = formatTime(s.timestamp),
             unread = s.unread,
             isOnline = false,
             isGroup = isGroup,
-            avatarPath = contact?.avatarPath
+            avatarPath = contact?.avatarPath,
+            lastStatus = lastStatus
         )
     }
 

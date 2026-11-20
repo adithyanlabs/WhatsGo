@@ -44,4 +44,9 @@ interface ContactDao {
     WHERE contacts.name = ''
 """)
     suspend fun insertNameIfAbsent(jid: String, name: String)
+
+    data class JidName(val jid: String, val name: String)
+
+    @Query("SELECT jid, name FROM contacts WHERE jid IN (:jids)")
+    suspend fun namesFor(jids: List<String>): List<JidName>
 }

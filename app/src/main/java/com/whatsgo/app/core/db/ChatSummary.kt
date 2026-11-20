@@ -5,5 +5,9 @@ data class ChatSummary(
     val lastMessage: String,
     val timestamp: Long,
     val fromMe: Boolean,
-    val unread: Int
+    val unread: Int,
+    val senderJid: String = "",
+    val senderName: String? = null,
+    val status: String = "sent",
+    val mediaType: String? = null
 )

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.vector.ImageVector
 
 import androidx.compose.runtime.Immutable
+import com.whatsgo.app.ui.chat.models.MessageStatus
 
 @Immutable
 data class ChatItem(
@@ -18,14 +19,15 @@ data class ChatItem(
     val isPinned: Boolean = false,
     val isGroup: Boolean = false,
     val isChannel: Boolean = false,
-    val avatarPath: String? = null
+    val avatarPath: String? = null,
+    val lastStatus: MessageStatus? = null
 )
 
 enum class TopTab(val label: String) {
     ALL("Chats"),
     GROUPS("Groups"),
     CHANNELS("Channels"),
-    UNREAD("Unread")
+    UNREAD("Unread"),
 }
 
 enum class BottomDest(val label: String, val icon: ImageVector, val filledIcon: ImageVector) {

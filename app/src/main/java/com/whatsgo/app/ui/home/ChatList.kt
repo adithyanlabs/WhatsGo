@@ -35,6 +35,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.style.TextAlign
 import coil3.request.crossfade
+import com.whatsgo.app.ui.chat.StatusDot
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material3.Icon
 
 @Composable
 fun ChatList(
@@ -167,6 +171,10 @@ fun ChatRow(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val isTyping = chat.lastMessage == "typing..." || chat.lastMessage == "recording audio..."
+                chat.lastStatus?.let { status ->
+                    StatusDot(status = status, isMine = true)
+                    Spacer(modifier = Modifier.width(6.dp))
+                }
                 Text(
                     text = chat.lastMessage,
                     fontSize = 13.sp,
@@ -216,11 +224,11 @@ private fun LetterAvatar(name: String) {
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = name.firstOrNull()?.uppercase() ?: "?",
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp
+        Icon(
+            Icons.Filled.Person,
+            contentDescription = null,
+            modifier = Modifier.size(30.dp),
+            tint = MaterialTheme.colorScheme.onPrimaryContainer
         )
     }
 }

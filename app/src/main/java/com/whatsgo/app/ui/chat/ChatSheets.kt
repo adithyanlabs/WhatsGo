@@ -208,11 +208,11 @@ fun ChatProfileSheet(
                             .clip(CircleShape)
                     )
                 } else {
-                    Text(
-                        text = profile.avatarLetter,
-                        fontSize = 36.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = cs.onPrimaryContainer
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = cs.onPrimaryContainer
                     )
                 }
             }
@@ -381,11 +381,11 @@ fun ChannelProfileSheet(
                             .clip(CircleShape)
                     )
                 } else {
-                    Text(
-                        text = name.take(1).uppercase(),
-                        fontSize = 36.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = cs.onPrimaryContainer
+                    Icon(
+                        Icons.Filled.Campaign,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = cs.onPrimaryContainer
                     )
                 }
             }
@@ -499,9 +499,11 @@ private fun MemberRow(m: GroupMember) {
             Modifier.size(44.dp).clip(CircleShape).background(cs.secondaryContainer),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                m.name.firstOrNull()?.uppercase() ?: "?",
-                color = cs.onSecondaryContainer, fontWeight = FontWeight.Bold, fontSize = 16.sp
+            Icon(
+                Icons.Filled.Person,
+                contentDescription = null,
+                modifier = Modifier.size(26.dp),
+                tint = cs.onSecondaryContainer
             )
         }
         Spacer(Modifier.width(14.dp))
@@ -571,9 +573,11 @@ fun GroupProfileSheet(
                             modifier = Modifier.fillMaxSize().clip(CircleShape)
                         )
                     } else {
-                        Text(
-                            name.take(1).uppercase(), fontSize = 36.sp,
-                            fontWeight = FontWeight.Bold, color = cs.onPrimaryContainer
+                        Icon(
+                            Icons.Filled.Group,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = cs.onPrimaryContainer
                         )
                     }
                 }
