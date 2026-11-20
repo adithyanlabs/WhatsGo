@@ -90,6 +90,7 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
            m.quotedId AS quotedId, m.quotedText AS quotedText, m.quotedSenderJid AS quotedSenderJid,
            m.mediaType AS mediaType, m.mediaCaption AS mediaCaption,
            m.mediaLocalPath AS mediaLocalPath, m.mediaThumbnail AS mediaThumbnail,
+           m.mediaSeconds AS mediaSeconds, m.mediaWaveform AS mediaWaveform,
            c.name AS senderName,
            q.text AS origText, q.fromMe AS origFromMe, q.senderJid AS origSenderJid,
            q.mediaType AS origMediaType, qc.name AS origSenderName

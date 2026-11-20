@@ -21,5 +21,7 @@ data class MessageRow(
     val origFromMe: Boolean?,
     val origSenderJid: String?,
     val origMediaType: String?,
-    val origSenderName: String?
+    val origSenderName: String?,
+    val mediaSeconds: Int?,
+    val mediaWaveform: ByteArray?
 )

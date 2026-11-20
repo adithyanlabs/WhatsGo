@@ -178,7 +178,12 @@ fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (
             }
 
             message.media?.let { media ->
-                MediaRenderer(media = media, isMine = isMine, onClick = { onMediaClick(message) })
+                MediaRenderer(
+                    media = media,
+                    messageId = message.messageId,
+                    isMine = isMine,
+                    onClick = { onMediaClick(message) }
+                )
                 if (message.text.isNotEmpty()) Spacer(Modifier.height(6.dp))
             }
 
@@ -348,7 +353,7 @@ private fun TimestampRow(message: ChatMessage, isMine: Boolean, modifier: Modifi
 }
 
 @Composable
-fun MediaRenderer(media: MediaAttachment, isMine: Boolean, onClick: () -> Unit) {
+fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val contentColor = if (isMine) cs.onPrimaryContainer else cs.onSurface
 
@@ -411,7 +416,12 @@ fun MediaRenderer(media: MediaAttachment, isMine: Boolean, onClick: () -> Unit) 
                 }
             }
         }
-        MediaType.VOICE -> VoiceMessagePlayer(media = media, contentColor = contentColor)
+        MediaType.VOICE -> VoiceMessagePlayer(
+            media = media,
+            messageId = messageId,
+            contentColor = contentColor,
+            onClick = onClick
+        )
         MediaType.DOCUMENT -> {
             Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(contentColor.copy(alpha = 0.06f)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
@@ -428,19 +438,75 @@ fun MediaRenderer(media: MediaAttachment, isMine: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-fun VoiceMessagePlayer(media: MediaAttachment, contentColor: androidx.compose.ui.graphics.Color) {
-    val waveformHeights = listOf(0.3f, 0.5f, 0.8f, 1.0f, 0.6f, 0.4f, 0.7f, 0.9f, 0.5f, 0.3f, 0.6f, 0.8f, 1.0f, 0.7f, 0.4f, 0.2f)
-    Row(modifier = Modifier.widthIn(min = 200.dp).padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.PlayArrow, "Play", tint = contentColor, modifier = Modifier.size(24.dp))
-        }
-        Spacer(Modifier.width(12.dp))
-        Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            waveformHeights.forEach { fraction ->
-                Box(modifier = Modifier.width(3.dp).height((24.dp * fraction).coerceAtLeast(4.dp)).clip(CircleShape).background(contentColor.copy(alpha = 0.5f)))
+fun VoiceMessagePlayer(
+    media: MediaAttachment,
+    messageId: String,
+    contentColor: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    val playback by VoicePlayer.state.collectAsState()
+    val active = playback.messageId == messageId
+    val progress = if (active && playback.durationMs > 0) {
+        playback.positionMs / playback.durationMs.toFloat()
+    } else 0f
+    val bars = remember(media.waveform) {
+        val waveform = media.waveform
+        if (waveform == null || waveform.isEmpty()) {
+            List(28) { 0.3f + 0.7f * ((it * 7) % 10) / 10f }
+        } else {
+            List(28) { index ->
+                val from = index * waveform.size / 28
+                val to = ((index + 1) * waveform.size / 28)
+                    .coerceAtLeast(from + 1)
+                    .coerceAtMost(waveform.size)
+                ((from until to).maxOf { waveform[it].toInt() } / 100f).coerceIn(0.1f, 1f)
             }
         }
+    }
+    val icon = when {
+        !media.isDownloaded -> Icons.Filled.Download
+        active && playback.playing -> Icons.Filled.Pause
+        else -> Icons.Filled.PlayArrow
+    }
+    val label = if (active && playback.playing) {
+        val seconds = playback.positionMs / 1000
+        "%d:%02d".format(seconds / 60, seconds % 60)
+    } else {
+        media.durationText ?: "0:00"
+    }
+
+    Row(
+        modifier = Modifier.widthIn(min = 220.dp).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(contentColor.copy(alpha = 0.15f))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, "Play voice message", tint = contentColor, modifier = Modifier.size(24.dp))
+        }
         Spacer(Modifier.width(12.dp))
-        Text(text = media.durationText ?: "0:12", color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Row(
+            modifier = Modifier.weight(1f).height(28.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            bars.forEachIndexed { index, fraction ->
+                val played = (index + 1) / bars.size.toFloat() <= progress
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height((24.dp * fraction).coerceAtLeast(3.dp))
+                        .clip(CircleShape)
+                        .background(contentColor.copy(alpha = if (played) 1f else 0.4f))
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(label, color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
 }

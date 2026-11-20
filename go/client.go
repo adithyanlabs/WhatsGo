@@ -27,6 +27,7 @@ type LoginCallback interface {
 	OnMessageStatus(messageID string, status string)
 	OnMessage(chatJID string, senderJID string, messageID string, text string, timestamp int64, fromMe bool, quotedID string, quotedText string, senderPushName string, quotedSenderJID string)
 	OnMediaMessage(chatJID string, senderJID string, messageID string, mediaType string, caption string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, thumbnail []byte, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
+	OnAudioMessage(chatJID string, senderJID string, messageID string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, seconds int64, ptt bool, waveform []byte, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 
 	OnStatusMessage(statusID string, senderJID string, senderName string, timestamp int64, fromMe bool, mediaType string, text string, backgroundColor int64, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, thumbnail []byte)
 	OnStatusViewed(statusID string, viewerJID string)

@@ -259,6 +259,37 @@ class ChatSession(dbPath: String, context: Context) {
             )
         }
 
+        override fun onAudioMessage(
+            chatJid: String, senderJid: String, messageId: String,
+            timestamp: Long, fromMe: Boolean, url: String, directPath: String,
+            mediaKey: ByteArray?, fileEncSHA256: ByteArray?, fileSHA256: ByteArray?,
+            fileLength: Long, mimetype: String, seconds: Long, ptt: Boolean, waveform: ByteArray?,
+            quotedId: String, quotedText: String, quotedSenderJid: String, senderPushName: String
+        ) {
+            ops.trySend(Op.Msg(
+                Incoming(
+                    MessageEntity(
+                        messageId = messageId, chatJid = chatJid, senderJid = senderJid,
+                        text = "", timestamp = timestamp, fromMe = fromMe, isRead = fromMe,
+                        quotedId = quotedId.ifBlank { null },
+                        quotedText = quotedText.ifBlank { null },
+                        quotedSenderJid = quotedSenderJid.ifBlank { null },
+                        mediaType = if (ptt) "voice" else "audio",
+                        mediaMimetype = mimetype,
+                        mediaUrl = url,
+                        mediaDirectPath = directPath,
+                        mediaKey = mediaKey ?: ByteArray(0),
+                        mediaFileEncSha256 = fileEncSHA256 ?: ByteArray(0),
+                        mediaFileSha256 = fileSHA256 ?: ByteArray(0),
+                        mediaFileLength = fileLength,
+                        mediaSeconds = seconds.toInt(),
+                        mediaWaveform = waveform?.takeIf { it.isNotEmpty() }
+                    ),
+                    chatJid, senderJid, fromMe, senderPushName
+                )
+            ))
+        }
+
         override fun onStatusMessage(
             statusID: String, senderJID: String, senderName: String, timestamp: Long,
             fromMe: Boolean, mediaType: String, text: String, backgroundColor: Long,
@@ -753,6 +784,38 @@ class ChatSession(dbPath: String, context: Context) {
                 val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
                 if (realId != null && realTimestamp != null) db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
             } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_video_failed")) }
+        }
+        return true
+    }
+
+    fun sendAudioMessage(chatJid: String, localFilePath: String, seconds: Int, waveform: ByteArray): Boolean {
+        val tempId = "local_${System.nanoTime()}"
+        val nowSeconds = System.currentTimeMillis() / 1000
+        scope.launch {
+            db.messageDao().insert(
+                MessageEntity(
+                    messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
+                    text = "", timestamp = nowSeconds, fromMe = true, isRead = true,
+                    mediaType = "voice", mediaLocalPath = localFilePath,
+                    mediaMimetype = "audio/ogg; codecs=opus",
+                    mediaSeconds = seconds, mediaWaveform = waveform, status = "sending"
+                )
+            )
+        }
+        scope.launch {
+            try {
+                val result = client.sendAudioMessage(chatJid, localFilePath, seconds.toLong(), true, waveform)
+                val parts = result.split("|")
+                val realId = parts.getOrNull(0)
+                val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
+                if (realId != null && realTimestamp != null) {
+                    db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
+                    db.messageDao().setStatus(realId, "sent")
+                }
+            } catch (e: Exception) {
+                Log.e("ChatSession", "send_audio failed", e)
+                _events.tryEmit(LoginEvent.Error(e.message ?: "send_audio_failed"))
+            }
         }
         return true
     }

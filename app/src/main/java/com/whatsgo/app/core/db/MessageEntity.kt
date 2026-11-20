@@ -35,5 +35,7 @@ data class MessageEntity(
     val mediaFileLength: Long? = null,
     val mediaThumbnail: ByteArray? = null,
     val mediaLocalPath: String? = null,
-    val status: String = "sent"
+    val status: String = "sent",
+    val mediaSeconds: Int? = null,
+    val mediaWaveform: ByteArray? = null
 )

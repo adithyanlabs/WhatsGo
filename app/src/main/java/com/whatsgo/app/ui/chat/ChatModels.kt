@@ -22,7 +22,8 @@ data class MediaAttachment(
     val mediaKey: ByteArray? = null,
     val fileEncSha256: ByteArray? = null,
     val fileSha256: ByteArray? = null,
-    val fileLength: Long? = null
+    val fileLength: Long? = null,
+    val waveform: ByteArray? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -36,6 +37,7 @@ data class MediaAttachment(
                 directPath == other.directPath &&
                 fileLength == other.fileLength &&
                 thumbnail.contentEquals(other.thumbnail) &&
+                waveform.contentEquals(other.waveform) &&
                 mediaKey.contentEquals(other.mediaKey) &&
                 fileEncSha256.contentEquals(other.fileEncSha256) &&
                 fileSha256.contentEquals(other.fileSha256)

@@ -36,7 +36,11 @@ fun MessageInput(
     onAttachClick: () -> Unit,
     onSend: (String) -> Unit,
     onTyping: (String) -> Unit = {},
-    onVoiceClick: () -> Unit = {}
+    isRecording: Boolean = false,
+    recordSeconds: Int = 0,
+    onVoiceStart: () -> Unit = {},
+    onVoiceCancel: () -> Unit = {},
+    onVoiceSend: () -> Unit = {}
 ) {
     var text by remember { mutableStateOf("") }
     val isSendActive = text.isNotBlank()
@@ -49,6 +53,7 @@ fun MessageInput(
     )
 
     val cs = MaterialTheme.colorScheme
+    val showSend = isSendActive || isRecording
 
     Column(
         modifier = Modifier
@@ -137,73 +142,95 @@ fun MessageInput(
                 tonalElevation = pillElevation,
                 shadowElevation = 0.dp
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { /* TODO: Emoji picker */ },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.Filled.EmojiEmotions, "Emoji", tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
-                    }
-
-                    BasicTextField(
-                        value = text,
-                        onValueChange = {
-                            text = it
-                            onTyping(it)
-                        },
+                if (isRecording) {
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .padding(vertical = 8.dp, horizontal = 4.dp),
-                        textStyle = LocalTextStyle.current.copy(
-                            color = cs.onSurface,
-                            fontSize = 16.sp,
-                            lineHeight = 22.sp
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                        maxLines = 4,
-                        cursorBrush = SolidColor(cs.primary),
-                        interactionSource = interactionSource,
-                        decorationBox = { innerTextField ->
-                            if (text.isEmpty()) {
-                                Text(
-                                    "Message",
-                                    color = cs.onSurfaceVariant.copy(alpha = 0.6f),
-                                    fontSize = 16.sp
-                                )
-                            }
-                            innerTextField()
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = onVoiceCancel, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Filled.Delete, "Cancel recording", tint = cs.error)
                         }
-                    )
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(cs.error))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "%d:%02d".format(recordSeconds / 60, recordSeconds % 60),
+                            color = cs.onSurface,
+                            fontSize = 16.sp
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { /* TODO: Emoji picker */ },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Filled.EmojiEmotions, "Emoji", tint = cs.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                        }
+
+                        BasicTextField(
+                            value = text,
+                            onValueChange = {
+                                text = it
+                                onTyping(it)
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            textStyle = LocalTextStyle.current.copy(
+                                color = cs.onSurface,
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                            maxLines = 4,
+                            cursorBrush = SolidColor(cs.primary),
+                            interactionSource = interactionSource,
+                            decorationBox = { innerTextField ->
+                                if (text.isEmpty()) {
+                                    Text(
+                                        "Message",
+                                        color = cs.onSurfaceVariant.copy(alpha = 0.6f),
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        )
+                    }
                 }
             }
 
-            val actionContainerColor = if (isSendActive) cs.primary else cs.surfaceContainer
-            val actionContentColor = if (isSendActive) cs.onPrimary else cs.onSurfaceVariant
+            val actionContainerColor = if (showSend) cs.primary else cs.surfaceContainer
+            val actionContentColor = if (showSend) cs.onPrimary else cs.onSurfaceVariant
 
             FloatingActionButton(
                 onClick = {
-                    if (isSendActive) {
-                        onSend(text.trim())
-                        text = ""
-                    } else {
-                        onVoiceClick()
+                    when {
+                        isRecording -> onVoiceSend()
+                        isSendActive -> {
+                            onSend(text.trim())
+                            text = ""
+                        }
+                        else -> onVoiceStart()
                     }
                 },
                 modifier = Modifier.size(56.dp),
                 containerColor = actionContainerColor,
                 contentColor = actionContentColor,
                 elevation = FloatingActionButtonDefaults.elevation(
-                    defaultElevation = if (isSendActive) 4.dp else 2.dp,
+                    defaultElevation = if (showSend) 4.dp else 2.dp,
                     pressedElevation = 6.dp
                 )
             ) {
                 AnimatedContent(
-                    targetState = isSendActive,
+                    targetState = showSend,
                     transitionSpec = {
                         if (targetState) {
                             scaleIn(initialScale = 0.5f, animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) +

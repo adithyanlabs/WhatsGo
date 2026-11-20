@@ -14,6 +14,31 @@ func (c *Client) dispatchMessage(e *events.Message) {
 
 	chat := c.normJID(e.Info.Chat)
 	sender := c.normJID(e.Info.Sender)
+	if aud := e.Message.GetAudioMessage(); aud != nil {
+		quotedID, quotedText, quotedSender := "", "", ""
+		if ci := aud.GetContextInfo(); ci != nil {
+			quotedID = ci.GetStanzaID()
+			quotedSender = c.normJIDStr(ci.GetParticipant())
+			if qm := ci.GetQuotedMessage(); qm != nil {
+				quotedText = qm.GetConversation()
+			}
+		}
+		nonNil := func(b []byte) []byte {
+			if b == nil {
+				return []byte{}
+			}
+			return b
+		}
+		c.cb.OnAudioMessage(
+			chat.String(), sender.String(), e.Info.ID,
+			e.Info.Timestamp.Unix(), e.Info.IsFromMe,
+			aud.GetURL(), aud.GetDirectPath(),
+			nonNil(aud.GetMediaKey()), nonNil(aud.GetFileEncSHA256()), nonNil(aud.GetFileSHA256()),
+			int64(aud.GetFileLength()), aud.GetMimetype(), int64(aud.GetSeconds()), aud.GetPTT(), nonNil(aud.GetWaveform()),
+			quotedID, quotedText, quotedSender, e.Info.PushName,
+		)
+		return
+	}
 
 	img := e.Message.GetImageMessage()
 	vid := e.Message.GetVideoMessage()

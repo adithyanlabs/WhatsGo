@@ -20,6 +20,48 @@ func (c *Client) SendVideoMessage(chatJid, filePath, caption string, thumbnail [
 	return c.sendMediaMessage(chatJid, filePath, caption, thumbnail, whatsmeow.MediaVideo)
 }
 
+func (c *Client) SendAudioMessage(chatJid, filePath string, seconds int64, ptt bool, waveform []byte) (string, error) {
+	if c.inner.Store.ID == nil {
+		return "", ErrNotLoggedInLocal
+	}
+	jid, err := types.ParseJID(chatJid)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", err
+	}
+	uploaded, err := c.inner.Upload(context.Background(), data, whatsmeow.MediaAudio)
+	if err != nil {
+		return "", err
+	}
+	mimetype := http.DetectContentType(data)
+	if ptt || mimetype == "application/ogg" {
+		mimetype = "audio/ogg; codecs=opus"
+	}
+	audio := &waE2E.AudioMessage{
+		URL:           proto.String(uploaded.URL),
+		DirectPath:    proto.String(uploaded.DirectPath),
+		MediaKey:      uploaded.MediaKey,
+		Mimetype:      proto.String(mimetype),
+		FileEncSHA256: uploaded.FileEncSHA256,
+		FileSHA256:    uploaded.FileSHA256,
+		FileLength:    proto.Uint64(uint64(len(data))),
+		Seconds:       proto.Uint32(uint32(seconds)),
+		PTT:           proto.Bool(ptt),
+	}
+	if len(waveform) > 0 {
+		audio.Waveform = waveform
+	}
+	resp, err := c.inner.SendMessage(context.Background(), jid, &waE2E.Message{AudioMessage: audio})
+	if err != nil {
+		c.log.Errorf("audio send failed to %s: %v", chatJid, err)
+		return "", err
+	}
+	return fmt.Sprintf("%s|%d", resp.ID, resp.Timestamp.Unix()), nil
+}
+
 func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail []byte, mediaType whatsmeow.MediaType) (string, error) {
 	if c.inner.Store.ID == nil {
 		return "", ErrNotLoggedInLocal
@@ -96,6 +138,15 @@ func (c *Client) DownloadMedia(mediaType, url, directPath string, mediaKey, file
 		}
 	case "video":
 		downloadable = &waE2E.VideoMessage{
+			URL:           proto.String(url),
+			DirectPath:    proto.String(directPath),
+			MediaKey:      mediaKey,
+			FileEncSHA256: fileEncSHA256,
+			FileSHA256:    fileSHA256,
+			FileLength:    proto.Uint64(uint64(fileLength)),
+		}
+	case "audio", "voice":
+		downloadable = &waE2E.AudioMessage{
 			URL:           proto.String(url),
 			DirectPath:    proto.String(directPath),
 			MediaKey:      mediaKey,

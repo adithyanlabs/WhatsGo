@@ -1,5 +1,7 @@
 package com.whatsgo.app.ui.chat
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -35,6 +37,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.platform.LocalContext
@@ -178,6 +181,21 @@ fun ConversationScreen(
         }
     }
 
+    val recording by viewModel.recording.collectAsState()
+    val recordSeconds by viewModel.recordSeconds.collectAsState()
+    val micPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.startRecording() }
+    val startVoice = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            viewModel.startRecording()
+        } else {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -217,6 +235,11 @@ fun ConversationScreen(
                     MessageInput(
                         replyingTo = replyingTo,
                         onDismissReply = { replyingTo = null },
+                        isRecording = recording,
+                        recordSeconds = recordSeconds,
+                        onVoiceStart = { startVoice() },
+                        onVoiceCancel = { viewModel.finishRecording(send = false) },
+                        onVoiceSend = { viewModel.finishRecording(send = true) },
                         onAttachClick = {
                             coroutineScope.launch {
                                 if (isKeyboardOpen) {
@@ -247,10 +270,11 @@ fun ConversationScreen(
                 onLoadMore = viewModel::loadMore,
                 onMediaClick = { msg ->
                     val media = msg.media
-                    if (media != null && media.isDownloaded) {
-                        viewingMedia = msg
-                    } else {
-                        viewModel.downloadMedia(msg)
+                    when {
+                        media == null -> Unit
+                        media.type == MediaType.VOICE -> viewModel.toggleVoice(msg)
+                        media.isDownloaded -> viewingMedia = msg
+                        else -> viewModel.downloadMedia(msg)
                     }
                 },
                 modifier = Modifier.padding(padding)

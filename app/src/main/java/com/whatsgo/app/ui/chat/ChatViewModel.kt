@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.whatsgo.app.core.LoginEvent
 import com.whatsgo.app.core.PhoneFormatter
 import com.whatsgo.app.core.SessionHolder
+import com.whatsgo.app.core.VoiceRecorder
 import com.whatsgo.app.core.db.AppDatabase
 import com.whatsgo.app.core.db.MessageRow
 import com.whatsgo.app.ui.chat.models.ChatMessage
@@ -53,6 +54,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val session = SessionHolder.get(app)
     private val settingsRepo = SettingsRepository(app)
+    private val recorder = VoiceRecorder(app)
 
     private var currentChatJid: String = ""
     private var collectJob: Job? = null
@@ -68,6 +70,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _presenceSubtitle = MutableStateFlow<String?>(null)
     val presenceSubtitle: StateFlow<String?> = _presenceSubtitle.asStateFlow()
+    private val _recording = MutableStateFlow(false)
+    val recording: StateFlow<Boolean> = _recording.asStateFlow()
+    private val _recordSeconds = MutableStateFlow(0)
+    val recordSeconds: StateFlow<Int> = _recordSeconds.asStateFlow()
+    private var recordTimerJob: Job? = null
 
     private var typingResetJob: Job? = null
     private var outgoingTypingJob: Job? = null
@@ -227,10 +234,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         val media = mediaType?.let { type ->
             MediaAttachment(
-                type = if (type == "video") MediaType.VIDEO else MediaType.IMAGE,
+                type = when (type) {
+                    "video" -> MediaType.VIDEO
+                    "voice", "audio" -> MediaType.VOICE
+                    else -> MediaType.IMAGE
+                },
                 urlOrPath = mediaLocalPath ?: "",
                 isDownloaded = mediaLocalPath != null,
-                thumbnail = mediaThumbnail
+                thumbnail = mediaThumbnail,
+                durationText = mediaSeconds?.let { "%d:%02d".format(it / 60, it % 60) },
+                waveform = mediaWaveform
             )
         }
 
@@ -370,6 +383,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun close() {
+        finishRecording(send = false)
+        VoicePlayer.stop()
         session.closeChannel()
         session.watchPresence(null)
         if (currentChatJid.isNotEmpty()) {
@@ -437,17 +452,64 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { session.sendVideoMessage(currentChatJid, localPath, caption, thumbnail) }
     }
 
+    fun startRecording(): Boolean {
+        if (_recording.value || currentChatJid.isEmpty()) return false
+        if (!recorder.start(viewModelScope)) return false
+        VoicePlayer.stop()
+        _recording.value = true
+        _recordSeconds.value = 0
+        recordTimerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000)
+                _recordSeconds.value += 1
+            }
+        }
+        val chatJid = currentChatJid
+        viewModelScope.launch(Dispatchers.IO) {
+            session.sendChatPresence(chatJid, "composing", "audio")
+        }
+        return true
+    }
+
+    fun finishRecording(send: Boolean) {
+        if (!_recording.value) return
+        recordTimerJob?.cancel()
+        recordTimerJob = null
+        _recording.value = false
+        val chatJid = currentChatJid
+        val result = recorder.stop()
+        viewModelScope.launch(Dispatchers.IO) {
+            session.sendChatPresence(chatJid, "paused", "audio")
+        }
+        if (result == null) return
+        if (send && result.seconds >= 1 && chatJid.isNotEmpty()) {
+            session.sendAudioMessage(chatJid, result.path, result.seconds, result.waveform)
+        } else {
+            File(result.path).delete()
+        }
+    }
+
+    fun toggleVoice(message: ChatMessage) {
+        val media = message.media ?: return
+        if (media.isDownloaded) VoicePlayer.toggle(message.messageId, media.urlOrPath)
+        else downloadMedia(message)
+    }
+
     fun downloadMedia(message: ChatMessage) {
         val media = message.media ?: return
         if (media.isDownloaded) return
         viewModelScope.launch(Dispatchers.IO) {
             val e = db.messageDao().getById(message.messageId) ?: return@launch
-            val isVideo = e.mediaType == "video"
-            val ext = if (isVideo) "mp4" else "jpg"
+            val mediaType = e.mediaType ?: "image"
+            val ext = when (mediaType) {
+                "video" -> "mp4"
+                "voice", "audio" -> "ogg"
+                else -> "jpg"
+            }
             val outFile = File(getApplication<Application>().cacheDir, "dl_${e.messageId}.$ext")
             runCatching {
                 session.downloadMedia(
-                    mediaType = if (isVideo) "video" else "image",
+                    mediaType = mediaType,
                     url = e.mediaUrl ?: "",
                     directPath = e.mediaDirectPath ?: "",
                     mediaKey = e.mediaKey ?: ByteArray(0),
