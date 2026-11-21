@@ -771,11 +771,17 @@ class ChatSession(dbPath: String, context: Context) {
 
     fun sendChatPresence(chatJid: String, state: String, media: String = "") =
         runCatching {
-            if (!presenceOnline.get()) return@runCatching
+            // never drop "paused", or the other side shows typing until its own timeout
+            if (state == "composing" && !presenceOnline.get()) return@runCatching
             client.sendChatPresence(chatJid, state, media)
         }.onFailure {
             Log.w("ChatSession", "sendChatPresence failed for $chatJid: ${it.message}")
         }
+
+    /** Fire and forget on session scope. Survives ViewModel cancel. */
+    fun sendPausedDetached(chatJid: String, media: String = "") {
+        scope.launch { sendChatPresence(chatJid, "paused", media) }
+    }
 
     fun sendMessage(chatJid: String, text: String, replyToId: String? = null, replyToSenderJid: String? = null, replyToText: String? = null): Boolean {
         val tempId = "local_${System.nanoTime()}"

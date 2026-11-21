@@ -368,7 +368,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (chatJid.isEmpty()) return
 
         if (text.isBlank()) {
-            stopOutgoingTyping(chatJid)
+            stopOutgoingTyping()
             return
         }
 
@@ -377,32 +377,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
         outgoingTypingJob = viewModelScope.launch(Dispatchers.IO) {
             if (!settingsRepo.getBoolean("send_typing_presence", true)) return@launch
-            session.sendChatPresence(chatJid, "composing")
-            while (isActive) {
-                delay(1000)
-                val idleMs = System.currentTimeMillis() - lastTypingInputAt
-                if (idleMs >= TYPING_IDLE_TIMEOUT_MS) {
-                    session.sendChatPresence(chatJid, "paused")
-                    break
+            try {
+                session.sendChatPresence(chatJid, "composing")
+                var lastSent = System.currentTimeMillis()
+                while (isActive) {
+                    delay(1000)
+                    val now = System.currentTimeMillis()
+                    if (now - lastTypingInputAt >= TYPING_IDLE_TIMEOUT_MS) break
+                    if (now - lastSent >= TYPING_HEARTBEAT_MS) {      // keep alive WHILE typing
+                        session.sendChatPresence(chatJid, "composing")
+                        lastSent = now
+                    }
                 }
-                if (idleMs >= TYPING_HEARTBEAT_MS) {
-                    session.sendChatPresence(chatJid, "composing")
-                }
+            } finally {
+                // runs on idle timeout AND on cancel
+                session.sendPausedDetached(chatJid)
             }
         }
     }
 
-    private fun stopOutgoingTyping(chatJid: String) {
-        val wasTyping = outgoingTypingJob?.isActive == true
-        outgoingTypingJob?.cancel()
+    private fun stopOutgoingTyping() {
+        outgoingTypingJob?.cancel()      // the job's finally{} sends "paused"
         outgoingTypingJob = null
         lastTypingInputAt = 0L
-        if (!wasTyping) return
-        viewModelScope.launch(Dispatchers.IO) {
-            if (settingsRepo.getBoolean("send_typing_presence", true)) {
-                session.sendChatPresence(chatJid, "paused")
-            }
-        }
     }
 
     fun close() {
@@ -410,9 +407,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         VoicePlayer.stop()
         session.closeChannel()
         session.watchPresence(null)
-        if (currentChatJid.isNotEmpty()) {
-            stopOutgoingTyping(currentChatJid)
-        }
+        stopOutgoingTyping()
         currentChatJid = ""
         collectJob?.cancel()
         collectJob = null
@@ -423,6 +418,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         readJob?.cancel()
         readJob = null
         _presenceSubtitle.value = null
+    }
+
+    override fun onCleared() {
+        close()
+        super.onCleared()
     }
 
     private fun markIncomingAsRead(chatJid: String) {
@@ -529,9 +529,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _recording.value = false
         val chatJid = currentChatJid
         val result = recorder.stop()
-        viewModelScope.launch(Dispatchers.IO) {
-            session.sendChatPresence(chatJid, "paused", "audio")
-        }
+        if (chatJid.isNotEmpty()) session.sendPausedDetached(chatJid, "audio")
         if (result == null) return
         if (send && result.seconds >= 1 && chatJid.isNotEmpty()) {
             session.sendAudioMessage(chatJid, result.path, result.seconds, result.waveform)
