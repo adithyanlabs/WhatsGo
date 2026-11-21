@@ -30,8 +30,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +47,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil3.compose.AsyncImage
@@ -367,6 +371,13 @@ fun ConversationScreen(
     var showChannelProfile by remember { mutableStateOf(false) }
     var showGroupProfile by remember { mutableStateOf(false) }
     var viewingMedia by remember { mutableStateOf<ChatMessage?>(null) }
+    var searchOpen by rememberSaveable(chatJid) { mutableStateOf(false) }
+    var searchQuery by rememberSaveable(chatJid) { mutableStateOf("") }
+
+    val visibleMessages = remember(messages, searchQuery) {
+        if (searchQuery.isBlank()) messages
+        else messages.filter { it.text.contains(searchQuery, ignoreCase = true) }
+    }
 
     val listState = rememberLazyListState()
 
@@ -505,7 +516,7 @@ fun ConversationScreen(
                                 count = selected.size,
                                 canPin = !readOnly && single != null && !single.isDeleted && liveOk,
                                 isPinned = single?.isPinned == true,
-                                canInfo = single != null && single.isMine && !single.isDeleted && liveOk && !readOnly,
+                                canInfo = single != null && (single.isMine || single.isDeleted) && liveOk && !readOnly,
                                 canForward = selectedMsgs.isNotEmpty() && liveOk &&
                                         selectedMsgs.all { !it.isDeleted },
                                 onClose = { viewModel.clearSelection() },
@@ -534,6 +545,14 @@ fun ConversationScreen(
                                             else -> showProfile = true
                                         }
                                     }
+                                },
+                                searchOpen = searchOpen,
+                                searchQuery = searchQuery,
+                                onSearchQueryChange = { searchQuery = it },
+                                onSearchClick = { searchOpen = true },
+                                onCloseSearch = {
+                                    searchOpen = false
+                                    searchQuery = ""
                                 }
                             )
                         }
@@ -586,7 +605,7 @@ fun ConversationScreen(
             }
         ) { padding ->
             MessageList(
-                messages = messages,
+                messages = visibleMessages,
                 listState = listState,
                 onReplySwipe = { replyingTo = it },
                 showSenderNames = isGroup,
@@ -786,9 +805,15 @@ fun ConversationScreen(
 fun ConversationTopBar(
     profile: ChatProfile,
     onBack: () -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    searchOpen: Boolean = false,
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onCloseSearch: () -> Unit = {}
 ) {
     val cs = MaterialTheme.colorScheme
+    var moreExpanded by remember { mutableStateOf(false) }
     Surface(color = cs.surfaceContainer, tonalElevation = 2.dp, shadowElevation = 0.dp) {
         Row(
             modifier = Modifier
@@ -800,14 +825,41 @@ fun ConversationTopBar(
             IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
             }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable(onClick = onProfileClick)
-                    .padding(vertical = 8.dp, horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            if (searchOpen) {
+                TextField(
+                    value = searchQuery,
+                    onValueChange = onSearchQueryChange,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    placeholder = { Text("Search messages") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { onSearchQueryChange("") }) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = cs.surfaceContainerHighest,
+                        unfocusedContainerColor = cs.surfaceContainerHighest,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    )
+                )
+                IconButton(onClick = onCloseSearch, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.Close, "Close search")
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = onProfileClick)
+                        .padding(vertical = 8.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                 Box {
                     val avatarFile = profile.avatarPath?.let { File(it) }
                     if (avatarFile != null && avatarFile.exists()) {
@@ -867,9 +919,32 @@ fun ConversationTopBar(
                         )
                     }
                 }
-            }
-            IconButton(onClick = { /* TODO: Open More Menu */ }, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Filled.MoreVert, "More options")
+                }
+                Box {
+                    IconButton(onClick = { moreExpanded = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Filled.MoreVert, "More options")
+                    }
+                    DropdownMenu(
+                        expanded = moreExpanded,
+                        onDismissRequest = { moreExpanded = false },
+                        modifier = Modifier.widthIn(min = 196.dp),
+                        offset = DpOffset(0.dp, 4.dp)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Search") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = "Search messages"
+                                )
+                            },
+                            onClick = {
+                                moreExpanded = false
+                                onSearchClick()
+                            }
+                        )
+                    }
+                }
             }
         }
     }

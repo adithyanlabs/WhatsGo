@@ -72,6 +72,15 @@ object SettingsRegistry {
             defaultValue = true
         ),
         SettingDefinition(
+            id = "anti_delete_messages",
+            type = SettingType.TOGGLE,
+            title = "Keep deleted messages",
+            subtitle = "Keep message content visible and mark it as deleted",
+            icon = Icons.Filled.DeleteOutline,
+            categoryId = "chat",
+            defaultValue = false
+        ),
+        SettingDefinition(
             id = "dynamic_color",
             type = SettingType.TOGGLE,
             title = "Wallpaper colors",

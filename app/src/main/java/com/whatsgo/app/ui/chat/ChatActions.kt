@@ -384,7 +384,7 @@ fun ForwardSheet(
 // Message info sheet
 // ---------------------------------------------------------------------------
 
-private val infoFmt get() = SimpleDateFormat("d MMM, h:mm a", Locale.getDefault())
+private val infoFmt get() = SimpleDateFormat("d MMM, h:mm:ss a", Locale.getDefault())
 private fun fmtSec(sec: Long) = infoFmt.format(Date(sec * 1000))
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -424,6 +424,9 @@ fun MessageInfoSheet(
                 }
                 Spacer(Modifier.height(16.dp))
                 InfoLine("Sent", if (message.timestamp > 0) fmtSec(message.timestamp) else message.time, null)
+                if (message.isDeleted && message.deletedAt > 0) {
+                    InfoLine("Deleted", fmtSec(message.deletedAt), null)
+                }
                 Spacer(Modifier.height(8.dp))
             }
 

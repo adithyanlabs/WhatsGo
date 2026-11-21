@@ -139,7 +139,7 @@ fun SwipeableMessageBubble(
             modifier = Modifier
                 .fillMaxWidth()
                 .pointerInput(message.isMine, selectionMode, message.isDeleted) {
-                    if (selectionMode || message.isDeleted) return@pointerInput
+                    if (selectionMode || (message.isDeleted && !message.showDeletedContent)) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             if (abs(offsetX.value) > maxDragPx * 0.5f) onReplyTriggered()
@@ -207,7 +207,7 @@ fun MessageBubble(
                     )
                 }
 
-                if (message.isDeleted) {
+                if (message.isDeleted && !message.showDeletedContent) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Block, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(6.dp))
@@ -219,6 +219,27 @@ fun MessageBubble(
                     Spacer(Modifier.height(4.dp))
                     TimestampRow(message = message, isMine = isMine, modifier = Modifier.align(Alignment.End))
                     return@Column
+                }
+
+                if (message.showDeletedContent) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 5.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.DeleteOutline,
+                            contentDescription = "Deleted message",
+                            tint = cs.error,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            "Message deleted",
+                            fontStyle = FontStyle.Italic,
+                            fontSize = 11.sp,
+                            color = cs.error
+                        )
+                    }
                 }
 
                 if (message.isForwarded) {
@@ -245,9 +266,11 @@ fun MessageBubble(
 
                 if (message.text.isNotEmpty()) {
                     val density = LocalDensity.current
-                    val gutterDp = if (isMine) 58.dp else 44.dp
+                    // Reserve a little more room so the M3 timestamp/status cluster
+                    // does not sit on top of the final line of message text.
+                    val gutterDp = if (isMine) 66.dp else 52.dp
                     val gutterSp = with(density) { (gutterDp + if (message.isPinned) 14.dp else 0.dp).toSp() }
-                    val lineSp = with(density) { 14.dp.toSp() }
+                    val lineSp = with(density) { 18.dp.toSp() }
                     val annotated = buildAnnotatedString {
                         append(message.text)
                         appendInlineContent("footer", " ")
@@ -454,6 +477,7 @@ fun MediaRenderer(
         MediaType.VIDEO -> {
             Box(
                 modifier = Modifier
+                    .widthIn(min = 240.dp, max = 276.dp)
                     .fillMaxWidth()
                     .aspectRatio(4 / 3f)
                     .clip(RoundedCornerShape(16.dp))

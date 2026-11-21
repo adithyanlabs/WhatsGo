@@ -74,6 +74,8 @@ data class ChatMessage(
     val sendProgress: Int? = null,
     val timestamp: Long = 0L,
     val isDeleted: Boolean = false,
+    val showDeletedContent: Boolean = false,
+    val deletedAt: Long = 0L,
     val isForwarded: Boolean = false,
     val isPinned: Boolean = false
 )

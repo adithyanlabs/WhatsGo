@@ -101,7 +101,7 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
            m.mediaLocalPath AS mediaLocalPath, m.mediaThumbnail AS mediaThumbnail,
            m.mediaSeconds AS mediaSeconds, m.mediaWaveform AS mediaWaveform, m.mediaAnimated AS mediaAnimated,
            m.mediaFileName AS mediaFileName, m.mediaMimetype AS mediaMimetype,
-           m.isDeleted AS isDeleted, m.isForwarded AS isForwarded, m.isPinned AS isPinned,
+           m.isDeleted AS isDeleted, m.deletedAt AS deletedAt, m.isForwarded AS isForwarded, m.isPinned AS isPinned,
            c.name AS senderName,
            q.text AS origText, q.fromMe AS origFromMe, q.senderJid AS origSenderJid,
            q.mediaType AS origMediaType, qc.name AS origSenderName
@@ -124,11 +124,8 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
     @Query("SELECT messageId, mediaLocalPath, status, isRead, isDeleted, isForwarded, isPinned, pinnedAt, pinExpiresAt FROM messages WHERE messageId IN (:ids)")
     suspend fun localState(ids: List<String>): List<LocalState>
 
-    @Query("""UPDATE messages SET isDeleted = 1, text = '', mediaCaption = NULL, mediaType = NULL,
-    mediaLocalPath = NULL, mediaThumbnail = NULL, mediaUrl = NULL, mediaDirectPath = NULL,
-    mediaKey = NULL, mediaWaveform = NULL, mediaFileName = NULL, isPinned = 0
-    WHERE messageId = :id""")
-    suspend fun markDeleted(id: String)
+    @Query("UPDATE messages SET isDeleted = 1, deletedAt = :deletedAt, isPinned = 0 WHERE messageId = :id")
+    suspend fun markDeleted(id: String, deletedAt: Long)
 
     @Query("DELETE FROM messages WHERE messageId IN (:ids)")
     suspend fun deleteByIds(ids: List<String>)

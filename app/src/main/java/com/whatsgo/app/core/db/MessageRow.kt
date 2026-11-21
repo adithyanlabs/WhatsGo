@@ -28,6 +28,7 @@ data class MessageRow(
     val mediaFileName: String?,
     val mediaMimetype: String?,
     val isDeleted: Boolean,
+    val deletedAt: Long,
     val isForwarded: Boolean,
     val isPinned: Boolean
 )

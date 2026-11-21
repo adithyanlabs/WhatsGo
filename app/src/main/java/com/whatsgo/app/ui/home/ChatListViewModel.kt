@@ -26,11 +26,22 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import com.whatsgo.app.ui.chat.models.MessageStatus
+import com.whatsgo.app.ui.settings.data.SettingsRepository
 import kotlinx.coroutines.flow.map
+
+private const val TYPING_TIMEOUT_MS = 7_000L
+
+private data class TypingPreview(
+    val label: String,
+    val token: Long,
+    val startedAtMs: Long
+)
+
 @OptIn(FlowPreview::class)
 class ChatListViewModel(app: Application) : AndroidViewModel(app) {
     private val db = AppDatabase.get(app)
     private val session = SessionHolder.get(app)
+    private val settingsRepo = SettingsRepository(app)
 
     private val nameCache = ConcurrentHashMap<String, String>()
     private val missCache = ConcurrentHashMap<String, Long>()
@@ -49,8 +60,9 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
     val channels: StateFlow<List<ChatItem>> = combine(
         db.channelDao().observeAll(),
         summariesFlow,
-        contactsFlow
-    ) { chans, sums, contacts ->
+        contactsFlow,
+        settingsRepo.observeBoolean("anti_delete_messages", false)
+    ) { chans, sums, contacts, antiDelete ->
         val sumBy = sums.associateBy { it.chatJid }
         val avatarBy = contacts.associate { it.jid to it.avatarPath }
         chans.map { ch ->
@@ -62,12 +74,13 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
                 time = s?.let { formatTime(it.timestamp) } ?: "",
                 unread = s?.unread ?: 0,
                 isChannel = true,
-                avatarPath = avatarBy[ch.jid]
+                avatarPath = avatarBy[ch.jid],
+                lastMessageDeleted = antiDelete && s?.isDeleted == true
             ) to (s?.timestamp ?: 0L)
         }.sortedByDescending { it.second }.map { it.first }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val liveTypingState = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val liveTypingState = MutableStateFlow<Map<String, TypingPreview>>(emptyMap())
     private val livePresenceState = MutableStateFlow<Map<String, Boolean>>(emptyMap())
 
     init {
@@ -78,7 +91,15 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
                         val key = presenceKey(event.chatJid)
                         if (event.state == "composing") {
                             val label = if (event.media == "audio") "recording audio..." else "typing..."
-                            liveTypingState.value = liveTypingState.value + (key to label)
+                            val token = System.nanoTime()
+                            liveTypingState.value =
+                                liveTypingState.value + (key to TypingPreview(label, token, System.currentTimeMillis()))
+                            launch {
+                                kotlinx.coroutines.delay(TYPING_TIMEOUT_MS)
+                                if (liveTypingState.value[key]?.token == token) {
+                                    liveTypingState.value = liveTypingState.value - key
+                                }
+                            }
                         } else if (event.state == "paused") {
                             liveTypingState.value = liveTypingState.value - key
                         }
@@ -97,14 +118,17 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
                 summariesFlow,
                 contactsFlow,
                 liveTypingState,
-                livePresenceState
-            ) { allSummaries, contacts, typingMap, presenceMap ->
+                livePresenceState,
+                settingsRepo.observeBoolean("anti_delete_messages", false)
+            ) { allSummaries, contacts, typingMap, presenceMap, antiDelete ->
                 val summaries = allSummaries.filter { !it.chatJid.endsWith("@newsletter") }
                 val byJid = contacts.associateBy { it.jid }
                 val messageChats = summaries.map { s ->
-                    val item = toChatItem(s, byJid[s.chatJid])
+                    val item = toChatItem(s, byJid[s.chatJid], antiDelete)
                     val key = presenceKey(s.chatJid)
                     val typingText = typingMap[key]
+                        ?.takeIf { s.timestamp * 1000L < it.startedAtMs }
+                        ?.label
                     item.copy(
                         lastMessage = typingText ?: item.lastMessage,
                         lastStatus = if (typingText != null) null else item.lastStatus,
@@ -119,7 +143,7 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
                     .sortedBy { it.name.lowercase() }
                     .map { contact ->
                         val key = presenceKey(contact.jid)
-                        val typingText = typingMap[key]
+                        val typingText = typingMap[key]?.label
                         ChatItem(
                             id = contact.jid,
                             name = contact.name.ifBlank { contact.jid.substringBefore("@") },
@@ -143,7 +167,8 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun toChatItem(
         s: com.whatsgo.app.core.db.ChatSummary,
-        contact: ContactEntity?
+        contact: ContactEntity?,
+        antiDeleteEnabled: Boolean
     ): ChatItem {
         val isGroup = s.chatJid.endsWith("@g.us")
         val saved = contact?.name?.takeIf { it.isNotBlank() }
@@ -155,7 +180,8 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         val body = when {
-            s.isDeleted -> if (s.fromMe) "You deleted this message" else "This message was deleted"
+            s.isDeleted && !antiDeleteEnabled ->
+                if (s.fromMe) "You deleted this message" else "This message was deleted"
             s.mediaType == "image" -> "Image"
             s.mediaType == "video" -> "Video"
             s.mediaType == "voice" || s.mediaType == "audio" -> "Voice message"
@@ -191,7 +217,8 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
             isOnline = false,
             isGroup = isGroup,
             avatarPath = contact?.avatarPath,
-            lastStatus = lastStatus
+            lastStatus = lastStatus,
+            lastMessageDeleted = antiDeleteEnabled && s.isDeleted
         )
     }
 

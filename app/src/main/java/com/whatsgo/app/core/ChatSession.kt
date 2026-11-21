@@ -461,7 +461,7 @@ class ChatSession(dbPath: String, context: Context) {
                             }
                             is Op.Revoke -> {
                                 flush(batch)
-                                db.messageDao().markDeleted(cur.id)
+                                db.messageDao().markDeleted(cur.id, System.currentTimeMillis() / 1000)
                                 db.receiptDao().deleteFor(listOf(cur.id))
                             }
                             is Op.Pin -> {
@@ -1034,7 +1034,7 @@ class ChatSession(dbPath: String, context: Context) {
                 if (t.messageId.startsWith("local_")) { db.messageDao().deleteByIds(listOf(t.messageId)); continue }
                 try {
                     client.deleteForEveryone(chatJid, if (t.fromMe) "" else t.senderJid, t.messageId)
-                    db.messageDao().markDeleted(t.messageId)
+                    db.messageDao().markDeleted(t.messageId, System.currentTimeMillis() / 1000)
                 } catch (e: Exception) {
                     failed++
                     Log.e("ChatSession", "revoke failed", e)

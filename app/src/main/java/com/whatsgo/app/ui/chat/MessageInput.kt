@@ -6,6 +6,8 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
@@ -27,6 +29,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.whatsgo.app.ui.chat.models.ChatMessage
@@ -63,6 +67,8 @@ fun MessageInput(
     )
 
     val cs = MaterialTheme.colorScheme
+    val cancelDistancePx = with(LocalDensity.current) { 80.dp.toPx() }
+    val recordingState = rememberUpdatedState(isRecording)
     val showSend = isSendActive || isRecording
     var panelOpen by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
@@ -240,7 +246,46 @@ fun MessageInput(
                         else -> onVoiceStart()
                     }
                 },
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier
+                    .size(56.dp)
+                    .pointerInput(isSendActive) {
+                        if (isSendActive) return@pointerInput
+
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            // Once a tap has started a recording, let the FAB's
+                            // normal click handler finish it on the next tap.
+                            if (recordingState.value) return@awaitEachGesture
+                            val startedAt = System.currentTimeMillis()
+                            var cancelled = false
+
+                            // Start immediately so a normal tap keeps the existing
+                            // tap-to-record behavior.
+                            onVoiceStart()
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+                                val movedLeft = down.position.x - change.position.x >= cancelDistancePx
+
+                                if (movedLeft && !cancelled) {
+                                    cancelled = true
+                                    onVoiceCancel()
+                                }
+
+                                if (!change.pressed) {
+                                    if (!cancelled &&
+                                        System.currentTimeMillis() - startedAt >= 250L
+                                    ) {
+                                        onVoiceSend()
+                                    }
+                                    change.consume()
+                                    break
+                                }
+                                change.consume()
+                            }
+                        }
+                    },
                 containerColor = actionContainerColor,
                 contentColor = actionContentColor,
                 elevation = FloatingActionButtonDefaults.elevation(

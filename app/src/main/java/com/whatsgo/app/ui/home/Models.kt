@@ -20,7 +20,8 @@ data class ChatItem(
     val isGroup: Boolean = false,
     val isChannel: Boolean = false,
     val avatarPath: String? = null,
-    val lastStatus: MessageStatus? = null
+    val lastStatus: MessageStatus? = null,
+    val lastMessageDeleted: Boolean = false
 )
 
 enum class TopTab(val label: String) {

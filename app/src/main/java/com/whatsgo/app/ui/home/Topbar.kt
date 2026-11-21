@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ChatTopBar(
     title: String,
+    query: String,
+    onQueryChange: (String) -> Unit,
     searchActive: Boolean,
     onSearchActiveChange: (Boolean) -> Unit,
     menuExpanded: Boolean,
@@ -80,7 +82,6 @@ fun ChatTopBar(
                 }
             }
 
-            var query by rememberSaveable { mutableStateOf("") }
             val searchBarShape by animateDpAsState(
                 targetValue = if (searchActive) 12.dp else 28.dp,
                 animationSpec = tween(250),
@@ -89,7 +90,7 @@ fun ChatTopBar(
 
             OutlinedTextField(
                 value = query,
-                onValueChange = { query = it },
+                onValueChange = onQueryChange,
                 placeholder = { Text("Search") },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
@@ -98,7 +99,7 @@ fun ChatTopBar(
                         enter = fadeIn(),
                         exit = fadeOut()
                     ) {
-                        IconButton(onClick = { query = "" }) {
+                        IconButton(onClick = { onQueryChange("") }) {
                             Icon(Icons.Filled.Close, contentDescription = "Clear search")
                         }
                     }

@@ -206,18 +206,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun startMessageCollect(chatJid: String) {
         collectJob = viewModelScope.launch {
             val cache = HashMap<String, ChatMessage>()
-            limitFlow
-                .flatMapLatest { limit ->
+            combine(limitFlow, settingsRepo.observeBoolean("anti_delete_messages", false)) { limit, antiDelete ->
+                limit to antiDelete
+            }
+                .flatMapLatest { (limit, antiDelete) ->
                     db.messageDao().observeRecent(chatJid, limit)
                         .debounce(120)
-                        .map { limit to it }
+                        .map { rows -> Triple(limit, antiDelete, rows) }
                 }
-                .map { (limit, rows) ->
+                .map { (limit, antiDelete, rows) ->
                     Page(
                         limit = limit,
                         count = rows.size,
                         hasUnread = rows.any { !it.fromMe && !it.isRead },
-                        items = mapRows(rows, cache)
+                        items = mapRows(rows, cache, antiDelete)
                     )
                 }
                 .flowOn(Dispatchers.Default)
@@ -268,11 +270,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun mapRows(rows: List<MessageRow>, cache: HashMap<String, ChatMessage>): List<ChatMessage> {
+    private fun mapRows(
+        rows: List<MessageRow>,
+        cache: HashMap<String, ChatMessage>,
+        antiDeleteEnabled: Boolean
+    ): List<ChatMessage> {
         val out = ArrayList<ChatMessage>(rows.size)
         val ids = HashSet<String>(rows.size * 2)
         for (r in rows) {
-            val fresh = r.toChatMessage()
+            val fresh = r.toChatMessage(antiDeleteEnabled)
             val old = cache[r.messageId]
             val msg = if (old != null && old == fresh) old else fresh
             cache[r.messageId] = msg
@@ -283,7 +289,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         return out
     }
 
-    private fun MessageRow.toChatMessage(): ChatMessage {
+    private fun MessageRow.toChatMessage(antiDeleteEnabled: Boolean): ChatMessage {
         val name = if (fromMe) "" else displayName(senderJid, senderName)
 
         val reply = quotedId?.let {
@@ -334,14 +340,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             messageId = messageId,
             senderJid = senderJid,
             senderName = name,
-            text = if (isDeleted) "" else if (media != null) (mediaCaption ?: "") else text,
+            text = if (isDeleted && !antiDeleteEnabled) "" else if (media != null) (mediaCaption ?: "") else text,
             time = timeFmt.get()!!.format(Date(timestamp * 1000)),
             isMine = fromMe,
             status = mapped,
-            replyTo = if (isDeleted) null else reply,
-            media = if (isDeleted) null else media,
+            replyTo = if (isDeleted && !antiDeleteEnabled) null else reply,
+            media = if (isDeleted && !antiDeleteEnabled) null else media,
             timestamp = timestamp,
             isDeleted = isDeleted,
+            showDeletedContent = isDeleted && antiDeleteEnabled,
+            deletedAt = deletedAt,
             isForwarded = isForwarded,
             isPinned = isPinned
         )

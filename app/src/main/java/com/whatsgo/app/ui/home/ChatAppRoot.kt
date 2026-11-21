@@ -15,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -66,6 +67,7 @@ fun ChatAppRoot() {
         var showLogoutDialog by remember { mutableStateOf(false) }
         var isLoggingOut by remember { mutableStateOf(false) }
         var searchActive by remember { mutableStateOf(false) }
+        var searchQuery by rememberSaveable { mutableStateOf("") }
         var menuExpanded by remember { mutableStateOf(false) }
         val bottomPagerState = rememberPagerState(initialPage = 0) { BottomDest.entries.size }
         val selectedBottom = BottomDest.entries[bottomPagerState.currentPage]
@@ -96,6 +98,13 @@ fun ChatAppRoot() {
 
         val directChats = remember(chats) { chats.filter { !it.isGroup } }
         val groupChats = remember(chats) { chats.filter { it.isGroup } }
+        val searchResults = remember(chats, searchQuery) {
+            if (searchQuery.isBlank()) emptyList()
+            else chats.filter { chat ->
+                chat.name.contains(searchQuery, ignoreCase = true) ||
+                        chat.lastMessage.contains(searchQuery, ignoreCase = true)
+            }
+        }
 
         LaunchedEffect(selectedBottom) {
             if (selectedBottom != BottomDest.SETTINGS) settingsCategory = null
@@ -103,6 +112,7 @@ fun ChatAppRoot() {
         LaunchedEffect(pagerState.currentPage) {
             focusManager.clearFocus()
             searchActive = false
+            searchQuery = ""
         }
 
         LaunchedEffect(bottomPagerState.currentPage) {
@@ -122,6 +132,7 @@ fun ChatAppRoot() {
         BackHandler(enabled = searchActive) {
             focusManager.clearFocus()
             searchActive = false
+                    searchQuery = ""
         }
         BackHandler(
             enabled = selectedBottom != BottomDest.CHATS
@@ -218,6 +229,10 @@ fun ChatAppRoot() {
                                 dest == BottomDest.CHATS -> {
                                     ChatTopBar(
                                         title = currentTab.label,
+                                        query = searchQuery,
+                                        onQueryChange = { value ->
+                                            searchQuery = value
+                                        },
                                         searchActive = searchActive,
                                         onSearchActiveChange = { searchActive = it },
                                         menuExpanded = menuExpanded,
@@ -266,14 +281,14 @@ fun ChatAppRoot() {
                                     ) { innerPage ->
                                         when (tabs[innerPage]) {
                                             TopTab.ALL -> ChatList(
-                                                chats = directChats,
+                                                chats = if (searchQuery.isBlank()) directChats else searchResults,
                                                 listState = allChatsListState,
                                                 bottomPadding = FloatingNavClearance,
                                                 onChatClick = { selectedChat = it },
                                                 onAvatarNeeded = { session.requestAvatarRefresh(it) }
                                             )
                                             TopTab.GROUPS -> ChatList(
-                                                chats = groupChats,
+                                                chats = if (searchQuery.isBlank()) groupChats else searchResults,
                                                 listState = groupsListState,
                                                 bottomPadding = FloatingNavClearance,
                                                 onChatClick = { selectedChat = it },

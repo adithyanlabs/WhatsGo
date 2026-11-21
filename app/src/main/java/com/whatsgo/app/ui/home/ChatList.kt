@@ -38,6 +38,7 @@ import coil3.request.crossfade
 import com.whatsgo.app.ui.chat.StatusDot
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.Icon
 
 @Composable
@@ -175,6 +176,16 @@ fun ChatRow(
                     StatusDot(status = status, isMine = true)
                     Spacer(modifier = Modifier.width(6.dp))
                 }
+                if (chat.lastMessageDeleted) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = "Deleted message",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(16.dp)
+                    )
+                }
                 Text(
                     text = chat.lastMessage,
                     fontSize = 13.sp,
@@ -184,7 +195,6 @@ fun ChatRow(
                     color = if (isTyping) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f)
                 )
-
                 AnimatedVisibility(
                     visible = chat.unread > 0,
                     enter = scaleIn() + fadeIn(),
