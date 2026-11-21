@@ -6,7 +6,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 
-enum class MessageStatus { SENDING, SENT, DELIVERED, READ }
+enum class MessageStatus { SENDING, SENT, DELIVERED, READ, FAILED }
 enum class MediaType { IMAGE, VIDEO, VOICE, DOCUMENT, STICKER }
 
 @Immutable
@@ -70,7 +70,8 @@ data class ChatMessage(
     val isMine: Boolean,
     val status: MessageStatus = MessageStatus.SENT,
     val replyTo: ReplyPreview? = null,
-    val media: MediaAttachment? = null
+    val media: MediaAttachment? = null,
+    val sendProgress: Int? = null
 )
 
 data class ChatProfile(

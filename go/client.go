@@ -27,6 +27,7 @@ type LoginCallback interface {
 	OnMessageStatus(messageID string, status string)
 	OnMessage(chatJID string, senderJID string, messageID string, text string, timestamp int64, fromMe bool, quotedID string, quotedText string, senderPushName string, quotedSenderJID string)
 	OnMediaMessage(chatJID string, senderJID string, messageID string, mediaType string, caption string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, thumbnail []byte, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
+	OnDocumentMessage(chatJID string, senderJID string, messageID string, caption string, fileName string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 	OnAudioMessage(chatJID string, senderJID string, messageID string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, seconds int64, ptt bool, waveform []byte, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 	OnStickerMessage(chatJID string, senderJID string, messageID string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, animated bool, width int64, height int64, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 	OnFavoriteSticker(url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileLength int64, mimetype string, animated bool, width int64, height int64)
@@ -43,6 +44,7 @@ type LoginCallback interface {
 	OnChatPresence(chatJID string, senderJID string, state string, media string)
 	OnPresence(senderJID string, online bool, lastSeen int64)
 	OnChannelEvent(kind string, jid string)
+	OnUploadProgress(localID string, percent int64)
 }
 
 type Client struct {

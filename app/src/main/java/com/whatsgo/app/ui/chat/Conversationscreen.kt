@@ -1,60 +1,276 @@
 package com.whatsgo.app.ui.chat
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.MediaMetadataRetriever
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import com.whatsgo.app.ui.chat.models.*
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.isImeVisible
-import kotlin.time.Duration.Companion.milliseconds
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.ui.platform.LocalContext
+import coil3.compose.AsyncImage
+import com.whatsgo.app.core.OggOpusWriter
 import com.whatsgo.app.core.PhoneFormatter
 import com.whatsgo.app.core.SessionHolder
 import com.whatsgo.app.core.db.AppDatabase
+import com.whatsgo.app.ui.chat.models.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.widget.Toast
+import kotlinx.coroutines.cancel
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.material.icons.filled.Person
+private suspend fun getAudioDuration(context: Context, filePath: String): Int =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(filePath)
+            val durationStr =
+                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            retriever.release()
+            durationStr?.toLongOrNull()?.div(1000)?.toInt() ?: 0
+        }.getOrDefault(0)
+    }
+
+private suspend fun generateWaveform(filePath: String): ByteArray? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            ByteArray(50) { (Math.random() * 100).toInt().toByte() }
+        }.getOrNull()
+    }
+
+private suspend fun convertAudioToOpus(context: Context, inputPath: String): String? =
+    withContext(Dispatchers.IO) {
+        val outputFile = File(context.cacheDir, "voice_${System.currentTimeMillis()}.ogg")
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        var encoder: MediaCodec? = null
+        var ogg: OggOpusWriter? = null
+        try {
+            extractor.setDataSource(inputPath)
+            val track = (0 until extractor.trackCount).firstOrNull {
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)
+                    ?.startsWith("audio/") == true
+            } ?: return@withContext null
+            extractor.selectTrack(track)
+            val inFmt = extractor.getTrackFormat(track)
+            val inMime = inFmt.getString(MediaFormat.KEY_MIME)!!
+            var srcRate = inFmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var srcCh = inFmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+
+            // Fast path: already mono Ogg/Opus → no work
+            if (inMime == "audio/opus" && srcCh == 1 &&
+                (inputPath.endsWith(".ogg", true) || inputPath.endsWith(".opus", true))
+            ) return@withContext inputPath
+
+            val dec = MediaCodec.createDecoderByType(inMime)
+            decoder = dec
+            dec.configure(inFmt, null, null, 0)
+            dec.start()
+
+            val encFmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48000, 1)
+            encFmt.setInteger(MediaFormat.KEY_BIT_RATE, 24000)
+            val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
+            encoder = enc
+            enc.configure(encFmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            enc.start()
+
+            val writer = OggOpusWriter(outputFile, 48000)
+            ogg = writer
+            val eInfo = MediaCodec.BufferInfo()
+            var packets = 0
+            var encDone = false
+            var pts = 0L
+
+            fun drain(timeoutUs: Long) {
+                while (true) {
+                    val o = enc.dequeueOutputBuffer(eInfo, timeoutUs)
+                    if (o < 0) return
+                    if (eInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && eInfo.size > 0) {
+                        val b = enc.getOutputBuffer(o)!!
+                        b.position(eInfo.offset); b.limit(eInfo.offset + eInfo.size)
+                        val pkt = ByteArray(eInfo.size)
+                        b.get(pkt)
+                        writer.packet(pkt)
+                        packets++
+                    }
+                    enc.releaseOutputBuffer(o, false)
+                    if (eInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        encDone = true
+                        return
+                    }
+                }
+            }
+
+            val frame = ShortArray(960)           // 20 ms @ 48 kHz
+            var fill = 0
+            fun queueFrame(len: Int, eos: Boolean) {
+                while (true) {
+                    val idx = enc.dequeueInputBuffer(2_000)
+                    if (idx >= 0) {
+                        val buf = enc.getInputBuffer(idx)!!
+                        buf.clear(); buf.order(ByteOrder.LITTLE_ENDIAN)
+                        for (k in 0 until len) buf.putShort(frame[k])
+                        enc.queueInputBuffer(
+                            idx, 0, len * 2, pts,
+                            if (eos) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
+                        )
+                        pts += len * 1_000_000L / 48000
+                        return
+                    }
+                    drain(0)
+                }
+            }
+            fun emit(s: Short) {
+                frame[fill++] = s
+                if (fill == 960) { queueFrame(960, false); fill = 0; drain(0) }
+            }
+
+            // streaming linear resampler state
+            var step = srcRate / 48000.0
+            var p = 0.0
+            var prev: Short = 0
+            var mono = ShortArray(8192)
+
+            val info = MediaCodec.BufferInfo()
+            var inDone = false
+            var outDone = false
+            while (!outDone) {
+                ensureActive()
+                if (!inDone) {
+                    val i = dec.dequeueInputBuffer(2_000)
+                    if (i >= 0) {
+                        val n = extractor.readSampleData(dec.getInputBuffer(i)!!, 0)
+                        if (n < 0) {
+                            dec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inDone = true
+                        } else {
+                            dec.queueInputBuffer(i, 0, n, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val o = dec.dequeueOutputBuffer(info, 2_000)
+                when {
+                    o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val f = dec.outputFormat
+                        srcRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        srcCh = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                        step = srcRate / 48000.0
+                    }
+                    o >= 0 -> {
+                        if (info.size > 0) {
+                            val bb = dec.getOutputBuffer(o)!!
+                            bb.position(info.offset); bb.limit(info.offset + info.size)
+                            val sb = bb.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                            val frames = sb.remaining() / srcCh
+                            if (frames > 0) {
+                                if (mono.size < frames) mono = ShortArray(frames)
+                                if (srcCh == 1) sb.get(mono, 0, frames)
+                                else for (k in 0 until frames) {
+                                    var sum = 0
+                                    for (c in 0 until srcCh) sum += sb.get().toInt()
+                                    mono[k] = (sum / srcCh).toShort()
+                                }
+                                while (p < frames - 1) {
+                                    val i0 = Math.floor(p).toInt()
+                                    val fr = p - i0
+                                    val a = if (i0 < 0) prev.toInt() else mono[i0].toInt()
+                                    val b = mono[i0 + 1].toInt()
+                                    emit((a + (b - a) * fr).toInt().toShort())
+                                    p += step
+                                }
+                                p -= frames
+                                prev = mono[frames - 1]
+                            }
+                        }
+                        dec.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outDone = true
+                    }
+                }
+            }
+
+            queueFrame(fill, true)                // flush tail + EOS
+            while (!encDone) drain(10_000)
+
+            writer.close()
+            ogg = null
+            if (packets > 0) outputFile.absolutePath else { outputFile.delete(); null }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            android.util.Log.e("AudioConvert", "convert failed", e)
+            runCatching { ogg?.close() }
+            outputFile.delete()
+            null
+        } finally {
+            runCatching { encoder?.stop() }; runCatching { encoder?.release() }
+            runCatching { decoder?.stop() }; runCatching { decoder?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
+data class AudioFileData(
+    val localPath: String,
+    val fileName: String,
+    val mimeType: String,
+    val duration: Int,
+    val waveform: ByteArray?
+)
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -177,7 +393,8 @@ fun ConversationScreen(
             val isVideo = mimeType.startsWith("video")
             val localPath = copyUriToCacheFile(context, uri, if (isVideo) "mp4" else "jpg")
             if (localPath != null) {
-                val thumb = if (isVideo) generateVideoThumbnail(localPath) else generateImageThumbnail(localPath)
+                val thumb =
+                    if (isVideo) generateVideoThumbnail(localPath) else generateImageThumbnail(localPath)
                 if (isVideo) viewModel.sendVideo(localPath, thumbnail = thumb)
                 else viewModel.sendImage(localPath, thumbnail = thumb)
             }
@@ -185,6 +402,55 @@ fun ConversationScreen(
     }
 
     val recording by viewModel.recording.collectAsState()
+
+    var showAudioTypeDialog by remember { mutableStateOf<AudioFileData?>(null) }
+    var isConverting by remember { mutableStateOf(false) }
+    var pendingOgg by remember { mutableStateOf<Deferred<String?>?>(null) }
+
+    // Coroutine scope for audio processing
+    val audioProcessScope = remember { CoroutineScope(Dispatchers.IO + SupervisorJob()) }
+
+    val audioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            audioProcessScope.launch {
+                val copied = copyDocumentToCache(context, uri)
+                if (copied != null) {
+                    val (localPath, fileName) = copied
+                    val mimeType = context.contentResolver.getType(uri) ?: "audio/mpeg"
+                    val duration = getAudioDuration(context, localPath)
+                    val waveform = generateWaveform(localPath)
+                    showAudioTypeDialog =
+                        AudioFileData(localPath, fileName, mimeType, duration, waveform)
+                    pendingOgg = audioProcessScope.async {
+                        convertAudioToOpus(context, localPath)
+                    }
+                }
+            }
+        }
+    }
+
+    val documentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            audioProcessScope.launch {          // IO scope, file copy off main thread
+                val copied = copyDocumentToCache(context, uri)
+                if (copied != null) {
+                    val (localPath, fileName) = copied
+                    val mimeType = context.contentResolver.getType(uri)
+                        ?: "application/octet-stream"
+                    viewModel.sendDocument(localPath, fileName, mimeType)
+                } else {
+                    android.util.Log.e("DocPicker", "copyDocumentToCache returned null for $uri")
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) { onDispose { audioProcessScope.cancel() } }
+
     val recordSeconds by viewModel.recordSeconds.collectAsState()
     val micPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -281,6 +547,8 @@ fun ConversationScreen(
                     val media = msg.media
                     when {
                         media == null -> Unit
+                        msg.isMine && msg.status == MessageStatus.SENDING -> viewModel.cancelSend(msg)
+                        msg.status == MessageStatus.FAILED -> viewModel.retrySend(msg)
                         media.type == MediaType.VOICE -> viewModel.toggleVoice(msg)
                         media.isDownloaded -> viewingMedia = msg
                         else -> viewModel.downloadMedia(msg)
@@ -306,6 +574,8 @@ fun ConversationScreen(
                         MediaOption.GALLERY -> galleryLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                         )
+                        MediaOption.DOCUMENT -> documentLauncher.launch(arrayOf("*/*"))
+                        MediaOption.AUDIO -> audioLauncher.launch(arrayOf("audio/*"))
                         else -> Unit
                     }
                 }
@@ -322,7 +592,7 @@ fun ConversationScreen(
             }
         }
 
-        androidx.activity.compose.BackHandler(enabled = viewingMedia != null) {
+        BackHandler(enabled = viewingMedia != null) {
             viewingMedia = null
         }
 
@@ -337,6 +607,7 @@ fun ConversationScreen(
                 fetchAbout = fetchAbout
             )
         }
+
         if (showChannelProfile) {
             android.util.Log.d("ChannelUI", "showChannelProfile=$showChannelProfile")
             ChannelProfileSheet(
@@ -355,9 +626,63 @@ fun ConversationScreen(
                 onDismiss = { showGroupProfile = false }
             )
         }
-
+        showAudioTypeDialog?.let { audio ->
+            AlertDialog(
+                onDismissRequest = {
+                    pendingOgg?.cancel()
+                    pendingOgg = null
+                    if (!isConverting) showAudioTypeDialog = null
+                },
+                title = { Text("Send audio") },
+                text = {
+                    Text(
+                        if (isConverting) "Converting…"
+                        else if (audio.duration > 300) "Too long for voice note.\nAudio file = sent as attachment."
+                        else "${audio.fileName}\nVoice note = plays like recorded message. Audio file = sent as attachment."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !isConverting && audio.duration <= 300,
+                        onClick = {
+                            isConverting = true
+                            coroutineScope.launch {
+                                val ogg = pendingOgg?.await()
+                                if (ogg != null) {
+                                    viewModel.sendAudioMessage(
+                                        ogg,
+                                        audio.duration.coerceAtLeast(1),
+                                        audio.waveform ?: ByteArray(50) { 10 }
+                                    )
+                                } else {
+                                    Toast.makeText(context, "Convert failed", Toast.LENGTH_SHORT).show()
+                                }
+                                isConverting = false
+                                pendingOgg = null
+                                showAudioTypeDialog = null
+                            }
+                        }
+                    ) { Text("Voice note") }
+                },
+                dismissButton = {
+                    TextButton(
+                        enabled = !isConverting,
+                        onClick = {
+                            pendingOgg?.cancel()
+                            pendingOgg = null
+                            viewModel.sendAudioFile(
+                                audio.localPath, audio.fileName, audio.mimeType,
+                                audio.duration, audio.waveform
+                            )
+                            showAudioTypeDialog = null
+                        }
+                    ) { Text("Audio file") }
+                }
+            )
+        }
     }
 }
+
 @Composable
 fun ConversationTopBar(
     profile: ChatProfile,
@@ -385,12 +710,12 @@ fun ConversationTopBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box {
-                    val avatarFile = profile.avatarPath?.let { java.io.File(it) }
+                    val avatarFile = profile.avatarPath?.let { File(it) }
                     if (avatarFile != null && avatarFile.exists()) {
-                        coil3.compose.AsyncImage(
+                        AsyncImage(
                             model = avatarFile,
                             contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
@@ -424,13 +749,23 @@ fun ConversationTopBar(
                 if (profile.statusText.isNotBlank()) lastStatus = profile.statusText
 
                 Column(modifier = Modifier.animateContentSize()) {
-                    Text(profile.name, fontWeight = FontWeight.Bold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        profile.name,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     AnimatedVisibility(
                         visible = profile.statusText.isNotBlank(),
                         enter = fadeIn() + expandVertically(),
                         exit = fadeOut() + shrinkVertically()
                     ) {
-                        Text(lastStatus, fontSize = 13.sp, color = if (profile.isOnline) cs.primary else cs.onSurfaceVariant)
+                        Text(
+                            lastStatus,
+                            fontSize = 13.sp,
+                            color = if (profile.isOnline) cs.primary else cs.onSurfaceVariant
+                        )
                     }
                 }
             }
@@ -443,15 +778,18 @@ fun ConversationTopBar(
 
 @Composable
 private fun PulsingOnlineIndicator(
-    color: androidx.compose.ui.graphics.Color,
-    backgroundColor: androidx.compose.ui.graphics.Color,
+    color: Color,
+    backgroundColor: Color,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
         targetValue = 1.3f,
-        animationSpec = infiniteRepeatable(animation = tween(1200), repeatMode = RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200),
+            repeatMode = RepeatMode.Reverse
+        ),
         label = "scale"
     )
     Box(

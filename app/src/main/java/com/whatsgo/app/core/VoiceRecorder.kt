@@ -117,6 +117,13 @@ class VoiceRecorder(private val context: Context) {
                 if (packets > 0) {
                     val secs = ((ptsUs + 500_000) / 1_000_000).toInt().coerceAtLeast(1)
                     result = Result(file.absolutePath, secs, buildWaveform(peaks))
+                    // Debug: copy to external storage for verification
+                    val exportDir = context.getExternalFilesDir(null)
+                    if (exportDir != null) {
+                        val exportFile = File(exportDir, "voice_export_${System.currentTimeMillis()}.ogg")
+                        runCatching { file.copyTo(exportFile) }
+                            .onSuccess { Log.d("VoiceRecorder", "Exported: ${exportFile.absolutePath}") }
+                    }
                 } else file.delete()
             } catch (e: Exception) {
                 Log.e("VoiceRecorder", "record failed", e)
@@ -158,7 +165,7 @@ class VoiceRecorder(private val context: Context) {
 }
 
 /** Minimal Ogg/Opus writer: OpusHead + OpusTags + audio pages. 20 ms frames, 48 kHz granule clock. */
-private class OggOpusWriter(file: File, inputRate: Int) {
+internal class OggOpusWriter(file: File, inputRate: Int) {
     private val os = FileOutputStream(file)
     private val serial = Random.nextInt()
     private var seq = 0
@@ -171,8 +178,8 @@ private class OggOpusWriter(file: File, inputRate: Int) {
             .put("OpusHead".toByteArray())
             .put(1)                       // version
             .put(1)                       // channels
-            .putShort(312)                // pre-skip (48 kHz samples)
-            .putInt(inputRate)
+            .putShort(3840)                // pre-skip (48 kHz samples)
+            .putInt(48000)
             .putShort(0)                  // gain
             .put(0)                       // mapping family
             .array()
@@ -185,6 +192,7 @@ private class OggOpusWriter(file: File, inputRate: Int) {
             .putInt(0)
             .array()
         writePage(listOf(tags), 0L, 0)
+        granule = 3840L
     }
 
     fun packet(p: ByteArray) {

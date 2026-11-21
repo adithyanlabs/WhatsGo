@@ -14,6 +14,31 @@ func (c *Client) dispatchMessage(e *events.Message) {
 
 	chat := c.normJID(e.Info.Chat)
 	sender := c.normJID(e.Info.Sender)
+	if doc := e.Message.GetDocumentMessage(); doc != nil {
+		quotedID, quotedText, quotedSender := "", "", ""
+		if ci := doc.GetContextInfo(); ci != nil {
+			quotedID = ci.GetStanzaID()
+			quotedSender = c.normJIDStr(ci.GetParticipant())
+			if qm := ci.GetQuotedMessage(); qm != nil {
+				quotedText = qm.GetConversation()
+			}
+		}
+		nonNil := func(b []byte) []byte {
+			if b == nil {
+				return []byte{}
+			}
+			return b
+		}
+		c.cb.OnDocumentMessage(
+			chat.String(), sender.String(), e.Info.ID, doc.GetCaption(), doc.GetFileName(),
+			e.Info.Timestamp.Unix(), e.Info.IsFromMe,
+			doc.GetURL(), doc.GetDirectPath(),
+			nonNil(doc.GetMediaKey()), nonNil(doc.GetFileEncSHA256()), nonNil(doc.GetFileSHA256()),
+			int64(doc.GetFileLength()), doc.GetMimetype(),
+			quotedID, quotedText, quotedSender, e.Info.PushName,
+		)
+		return
+	}
 	if st := e.Message.GetStickerMessage(); st != nil {
 		quotedID, quotedText, quotedSender := "", "", ""
 		if ci := st.GetContextInfo(); ci != nil {

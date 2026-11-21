@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="updates" path="updates/" />
+    <cache-path name="media" path="." />
+    <files-path name="status_media" path="status_media/" />
+    <files-path name="stickers" path="stickers/" />
+    <files-path name="avatars" path="avatars/" />
 </paths>

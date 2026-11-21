@@ -41,7 +41,7 @@ import java.util.concurrent.ConcurrentHashMap
 import com.whatsgo.app.core.GroupInfoData
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
-
+import kotlinx.coroutines.flow.combine
 private const val TYPING_HEARTBEAT_MS = 3000L
 private const val TYPING_IDLE_TIMEOUT_MS = 4000L
 private const val PAGE_SIZE = 40
@@ -70,7 +70,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val channelLoading: StateFlow<Boolean> = session.channelLoading
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+    val messages: StateFlow<List<ChatMessage>> =
+        combine(_messages, session.uploadProgress) { list, prog ->
+            if (prog.isEmpty()) list
+            else list.map { m -> prog[m.messageId]?.let { m.copy(sendProgress = it) } ?: m }
+        }.flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _presenceSubtitle = MutableStateFlow<String?>(null)
     val presenceSubtitle: StateFlow<String?> = _presenceSubtitle.asStateFlow()
@@ -102,6 +107,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val timeFmt = object : ThreadLocal<SimpleDateFormat>() {
         override fun initialValue() = SimpleDateFormat("HH:mm", Locale.getDefault())
     }
+
+    fun cancelSend(m: ChatMessage) = session.cancelSend(m.messageId)
+    fun retrySend(m: ChatMessage) = session.retrySend(m.messageId)
 
     fun open(chatJid: String) {
         val sameChat = (currentChatJid == chatJid)
@@ -248,10 +256,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     "video" -> MediaType.VIDEO
                     "voice", "audio" -> MediaType.VOICE
                     "sticker" -> MediaType.STICKER
+                    "document" -> MediaType.DOCUMENT
                     else -> MediaType.IMAGE
                 },
                 urlOrPath = mediaLocalPath ?: "",
                 isDownloaded = mediaLocalPath != null,
+                fileName = mediaFileName,
                 thumbnail = mediaThumbnail,
                 durationText = mediaSeconds?.let { "%d:%02d".format(it / 60, it % 60) },
                 waveform = mediaWaveform,
@@ -264,6 +274,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             status == "read" -> MessageStatus.READ
             status == "delivered" -> MessageStatus.DELIVERED
             status == "sending" -> MessageStatus.SENDING
+            status == "failed" -> MessageStatus.FAILED
             else -> MessageStatus.SENT
         }
 
@@ -464,6 +475,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { session.sendVideoMessage(currentChatJid, localPath, caption, thumbnail) }
     }
 
+    fun sendDocument(localPath: String, fileName: String, mimeType: String, caption: String = "") {
+        if (currentChatJid.isEmpty()) return
+        viewModelScope.launch {
+            session.sendDocumentMessage(currentChatJid, localPath, fileName, mimeType, caption)
+        }
+    }
+
+    fun sendAudioMessage(localPath: String, seconds: Int, waveform: ByteArray) {
+        if (currentChatJid.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) { session.sendAudioMessage(currentChatJid, localPath, seconds, waveform) }
+    }
+
+    fun sendAudioFile(localPath: String, fileName: String, mimeType: String, seconds: Int, waveform: ByteArray?) {
+        if (currentChatJid.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) { session.sendAudioFileMessage(currentChatJid, localPath, fileName, mimeType, seconds, waveform) }
+    }
+
     fun sendSticker(sticker: StickerEntity) {
         val jid = currentChatJid
         if (jid.isNotEmpty()) viewModelScope.launch(Dispatchers.IO) { session.sendSticker(jid, sticker) }
@@ -528,6 +556,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "video" -> "mp4"
                 "voice", "audio" -> "ogg"
                 "sticker" -> "webp"
+                "document" -> e.mediaFileName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: "bin"
                 else -> "jpg"
             }
             val baseDir = if (mediaType == "sticker") File(getApplication<Application>().filesDir, "stickers").apply { mkdirs() }

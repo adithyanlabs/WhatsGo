@@ -24,5 +24,7 @@ data class MessageRow(
     val origSenderName: String?,
     val mediaSeconds: Int?,
     val mediaWaveform: ByteArray?,
-    val mediaAnimated: Boolean
+    val mediaAnimated: Boolean,
+    val mediaFileName: String?,
+    val mediaMimetype: String?
 )

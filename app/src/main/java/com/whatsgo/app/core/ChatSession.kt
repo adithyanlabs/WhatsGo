@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -122,6 +123,10 @@ class ChatSession(dbPath: String, context: Context) {
     private val prefs = appContext.getSharedPreferences("whatsgo_sync", Context.MODE_PRIVATE)
     private val settingsRepo = SettingsRepository(appContext)
 
+    private val _uploadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val uploadProgress: StateFlow<Map<String, Int>> = _uploadProgress.asStateFlow()
+    private val cancelledUploads: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     private val fetchStarted = AtomicBoolean(false)
 
     private val _historyProgress = MutableStateFlow<Int?>(null)
@@ -156,6 +161,11 @@ class ChatSession(dbPath: String, context: Context) {
         }
         override fun onError(msg: String) { _events.tryEmit(LoginEvent.Error(msg)) }
         override fun onMessageStatus(messageID: String, status: String) { ops.trySend(Op.Status(messageID, status)) }
+
+        override fun onUploadProgress(localID: String, percent: Long) {
+            if (localID in cancelledUploads) return
+            _uploadProgress.update { if (it.containsKey(localID)) it + (localID to percent.toInt()) else it }
+        }
 
         override fun onOfflineSyncPreview(total: Long, messages: Long, notifications: Long, receipts: Long) {
             HistorySyncService.startOffline(appContext, messages.toInt())
@@ -261,6 +271,40 @@ class ChatSession(dbPath: String, context: Context) {
             )
         }
 
+        override fun onDocumentMessage(
+            chatJid: String, senderJid: String, messageId: String,
+            caption: String, fileName: String, timestamp: Long, fromMe: Boolean,
+            url: String, directPath: String,
+            mediaKey: ByteArray?, fileEncSHA256: ByteArray?, fileSHA256: ByteArray?,
+            fileLength: Long, mimetype: String,
+            quotedId: String, quotedText: String, quotedSenderJid: String,
+            senderPushName: String
+        ) {
+            ops.trySend(Op.Msg(
+                Incoming(
+                    MessageEntity(
+                        messageId = messageId, chatJid = chatJid, senderJid = senderJid,
+                        text = caption, timestamp = timestamp, fromMe = fromMe, isRead = fromMe,
+                        quotedId = quotedId.ifBlank { null },
+                        quotedText = quotedText.ifBlank { null },
+                        quotedSenderJid = quotedSenderJid.ifBlank { null },
+                        mediaType = "document",
+                        mediaCaption = caption.ifBlank { null },
+                        mediaMimetype = mimetype,
+                        mediaUrl = url,
+                        mediaDirectPath = directPath,
+                        mediaKey = mediaKey ?: ByteArray(0),
+                        mediaFileEncSha256 = fileEncSHA256 ?: ByteArray(0),
+                        mediaFileSha256 = fileSHA256 ?: ByteArray(0),
+                        mediaFileLength = fileLength,
+                        mediaFileName = fileName.ifBlank { "Document" },
+                        mediaLocalPath = null
+                    ),
+                    chatJid, senderJid, fromMe, senderPushName
+                )
+            ))
+        }
+
         override fun onAudioMessage(
             chatJid: String, senderJid: String, messageId: String,
             timestamp: Long, fromMe: Boolean, url: String, directPath: String,
@@ -352,6 +396,8 @@ class ChatSession(dbPath: String, context: Context) {
     private val client: Client = Engine.newClient(dbPath, callback)
 
     init {
+
+        scope.launch { runCatching { db.messageDao().failStaleSending() } }
 
         scope.launch {
             val batch = ArrayList<Incoming>(500)
@@ -762,83 +808,158 @@ class ChatSession(dbPath: String, context: Context) {
         return true
     }
 
+    private fun newLocalId() = "local_${System.nanoTime()}"
+    private fun nowSec() = System.currentTimeMillis() / 1000
+
+    private suspend fun runUpload(tempId: String, tag: String, send: suspend () -> String) {
+        cancelledUploads.remove(tempId)
+        _uploadProgress.update { it + (tempId to 0) }          // before service start
+        SendProgressService.start(appContext)
+        try {
+            val parts = send().split("|")
+            val realId = parts.getOrNull(0)
+            val ts = parts.getOrNull(1)?.toLongOrNull()
+            if (realId != null && ts != null) {
+                db.messageDao().reconcileMessageId(tempId, realId, ts)
+                db.messageDao().setStatus(realId, "sent")
+            }
+        } catch (e: Exception) {
+            if (cancelledUploads.remove(tempId)) {
+                db.messageDao().deleteById(tempId)              // user cancelled → remove bubble
+            } else {
+                Log.e("ChatSession", "$tag failed", e)
+                db.messageDao().setStatus(tempId, "failed")
+                _events.tryEmit(LoginEvent.Error(e.message ?: tag))
+            }
+        } finally {
+            _uploadProgress.update { it - tempId }
+        }
+    }
+
+    fun cancelSend(messageId: String) {
+        if (_uploadProgress.value.containsKey(messageId)) {
+            cancelledUploads.add(messageId)
+            client.cancelUpload(messageId)
+        } else {
+            scope.launch { db.messageDao().setStatus(messageId, "failed") }  // stuck "sending" → allow retry
+        }
+    }
+
+    fun cancelAllUploads() { _uploadProgress.value.keys.toList().forEach { cancelSend(it) } }
+
+    fun retrySend(messageId: String) {
+        if (!messageId.startsWith("local_")) return
+        scope.launch {
+            val e = db.messageDao().getById(messageId) ?: return@launch
+            val path = e.mediaLocalPath
+            if (path == null || !File(path).exists()) {
+                _events.tryEmit(LoginEvent.Error("File no longer available"))
+                return@launch
+            }
+            db.messageDao().setStatus(messageId, "sending")
+            runUpload(messageId, "retry") {
+                when (e.mediaType) {
+                    "image" -> client.sendImageMessage(e.chatJid, path, e.mediaCaption ?: "", e.mediaThumbnail ?: ByteArray(0), messageId)
+                    "video" -> client.sendVideoMessage(e.chatJid, path, e.mediaCaption ?: "", e.mediaThumbnail ?: ByteArray(0), messageId)
+                    "document" -> client.sendDocumentMessage(e.chatJid, path, e.mediaFileName ?: "document", e.mediaMimetype ?: "", e.mediaCaption ?: "", messageId)
+                    "voice" -> client.sendAudioMessage(e.chatJid, path, (e.mediaSeconds ?: 1).toLong(), true, e.mediaWaveform ?: ByteArray(0), "audio/ogg; codecs=opus", messageId)
+                    "audio" -> client.sendAudioMessage(e.chatJid, path, (e.mediaSeconds ?: 0).toLong(), false, e.mediaWaveform ?: ByteArray(0), e.mediaMimetype ?: "", messageId)
+                    else -> error("unsupported media type")
+                }
+            }
+        }
+    }
+
     fun sendImageMessage(chatJid: String, localFilePath: String, caption: String, thumbnail: ByteArray?): Boolean {
-        val tempId = "local_${System.nanoTime()}"
-        val nowSeconds = System.currentTimeMillis() / 1000
+        val tempId = newLocalId()
         scope.launch {
             db.messageDao().insert(
                 MessageEntity(
                     messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
-                    text = caption, timestamp = nowSeconds, fromMe = true, isRead = true,
+                    text = caption, timestamp = nowSec(), fromMe = true, isRead = true,
                     mediaType = "image", mediaCaption = caption.ifBlank { null },
-                    mediaLocalPath = localFilePath, mediaThumbnail = thumbnail
+                    mediaLocalPath = localFilePath, mediaThumbnail = thumbnail, status = "sending"
                 )
             )
-        }
-        scope.launch {
-            try {
-                val result = client.sendImageMessage(chatJid, localFilePath, caption, thumbnail ?: ByteArray(0))
-                val parts = result.split("|")
-                val realId = parts.getOrNull(0)
-                val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
-                if (realId != null && realTimestamp != null) db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
-            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_image_failed")) }
+            runUpload(tempId, "send_image") {
+                client.sendImageMessage(chatJid, localFilePath, caption, thumbnail ?: ByteArray(0), tempId)
+            }
         }
         return true
     }
 
     fun sendVideoMessage(chatJid: String, localFilePath: String, caption: String, thumbnail: ByteArray?): Boolean {
-        val tempId = "local_${System.nanoTime()}"
-        val nowSeconds = System.currentTimeMillis() / 1000
+        val tempId = newLocalId()
         scope.launch {
             db.messageDao().insert(
                 MessageEntity(
                     messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
-                    text = caption, timestamp = nowSeconds, fromMe = true, isRead = true,
+                    text = caption, timestamp = nowSec(), fromMe = true, isRead = true,
                     mediaType = "video", mediaCaption = caption.ifBlank { null },
-                    mediaLocalPath = localFilePath, mediaThumbnail = thumbnail
+                    mediaLocalPath = localFilePath, mediaThumbnail = thumbnail, status = "sending"
                 )
             )
+            runUpload(tempId, "send_video") {
+                client.sendVideoMessage(chatJid, localFilePath, caption, thumbnail ?: ByteArray(0), tempId)
+            }
         }
+        return true
+    }
+
+    fun sendDocumentMessage(chatJid: String, localFilePath: String, fileName: String, mimeType: String, caption: String): Boolean {
+        val tempId = newLocalId()
         scope.launch {
-            try {
-                val result = client.sendVideoMessage(chatJid, localFilePath, caption, thumbnail ?: ByteArray(0))
-                val parts = result.split("|")
-                val realId = parts.getOrNull(0)
-                val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
-                if (realId != null && realTimestamp != null) db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
-            } catch (e: Exception) { _events.tryEmit(LoginEvent.Error(e.message ?: "send_video_failed")) }
+            db.messageDao().insert(
+                MessageEntity(
+                    messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
+                    text = caption, timestamp = nowSec(), fromMe = true, isRead = true,
+                    mediaType = "document", mediaCaption = caption.ifBlank { null },
+                    mediaMimetype = mimeType.ifBlank { null },
+                    mediaLocalPath = localFilePath, mediaFileName = fileName, status = "sending"
+                )
+            )
+            runUpload(tempId, "send_document") {
+                client.sendDocumentMessage(chatJid, localFilePath, fileName, mimeType, caption, tempId)
+            }
         }
         return true
     }
 
     fun sendAudioMessage(chatJid: String, localFilePath: String, seconds: Int, waveform: ByteArray): Boolean {
-        val tempId = "local_${System.nanoTime()}"
-        val nowSeconds = System.currentTimeMillis() / 1000
+        val tempId = newLocalId()
         scope.launch {
             db.messageDao().insert(
                 MessageEntity(
                     messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
-                    text = "", timestamp = nowSeconds, fromMe = true, isRead = true,
+                    text = "", timestamp = nowSec(), fromMe = true, isRead = true,
                     mediaType = "voice", mediaLocalPath = localFilePath,
                     mediaMimetype = "audio/ogg; codecs=opus",
                     mediaSeconds = seconds, mediaWaveform = waveform, status = "sending"
                 )
             )
+            runUpload(tempId, "send_audio") {
+                client.sendAudioMessage(chatJid, localFilePath, seconds.toLong(), true, waveform, "audio/ogg; codecs=opus", tempId)
+            }
         }
+        return true
+    }
+
+    fun sendAudioFileMessage(chatJid: String, localFilePath: String, fileName: String, mimeType: String, seconds: Int, waveform: ByteArray?): Boolean {
+        val tempId = newLocalId()
+        val mime = mimeType.ifBlank { "audio/mpeg" }
         scope.launch {
-            try {
-                val result = client.sendAudioMessage(chatJid, localFilePath, seconds.toLong(), true, waveform)
-                val parts = result.split("|")
-                val realId = parts.getOrNull(0)
-                val realTimestamp = parts.getOrNull(1)?.toLongOrNull()
-                if (realId != null && realTimestamp != null) {
-                    db.messageDao().reconcileMessageId(tempId, realId, realTimestamp)
-                    db.messageDao().setStatus(realId, "sent")
-                }
-            } catch (e: Exception) {
-                Log.e("ChatSession", "send_audio failed", e)
-                _events.tryEmit(LoginEvent.Error(e.message ?: "send_audio_failed"))
+            db.messageDao().insert(
+                MessageEntity(
+                    messageId = tempId, chatJid = chatJid, senderJid = client.getOwnJID(),
+                    text = "", timestamp = nowSec(), fromMe = true, isRead = true,
+                    mediaType = "audio", mediaLocalPath = localFilePath, mediaMimetype = mime,
+                    mediaFileName = fileName.ifBlank { "audio" },
+                    mediaSeconds = seconds, mediaWaveform = waveform?.takeIf { it.isNotEmpty() },
+                    status = "sending"
+                )
+            )
+            runUpload(tempId, "send_audio_file") {
+                client.sendAudioMessage(chatJid, localFilePath, seconds.toLong(), false, waveform ?: ByteArray(0), mime, tempId)
             }
         }
         return true

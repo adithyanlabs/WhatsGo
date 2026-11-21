@@ -1,5 +1,6 @@
 package com.whatsgo.app.ui.chat
 
+import android.content.Intent
 import android.net.Uri
 import android.widget.MediaController
 import android.widget.VideoView
@@ -27,6 +28,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import com.whatsgo.app.ui.chat.models.MediaType
 import java.io.File
 
@@ -44,6 +46,7 @@ fun MediaViewerScreen(
         when (mediaType) {
             MediaType.IMAGE -> ZoomableImage(filePath = filePath)
             MediaType.VIDEO -> VideoPlayerView(filePath = filePath)
+            MediaType.DOCUMENT -> OpenDocument(filePath = filePath, onBack = onBack)
             else -> Unit
         }
 
@@ -56,6 +59,21 @@ fun MediaViewerScreen(
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
         }
     }
+}
+
+@Composable
+private fun OpenDocument(filePath: String, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val file = File(filePath)
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, context.contentResolver.getType(uri) ?: "application/octet-stream")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    if (intent.resolveActivity(context.packageManager) != null) {
+        context.startActivity(intent)
+    }
+    onBack()
 }
 
 @Composable
@@ -103,11 +121,12 @@ private fun ZoomableImage(filePath: String) {
 @Composable
 private fun VideoPlayerView(filePath: String) {
     val context = LocalContext.current
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", File(filePath))
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = {
             VideoView(context).apply {
-                setVideoURI(Uri.fromFile(File(filePath)))
+                setVideoURI(uri)
                 val controller = MediaController(context)
                 controller.setAnchorView(this)
                 setMediaController(controller)

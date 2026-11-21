@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material3.*
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,8 +42,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.border
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
-import androidx.compose.foundation.border
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
@@ -50,6 +49,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 @Composable
 fun MessageList(
     messages: List<ChatMessage>,
@@ -150,6 +151,7 @@ private fun expressiveBubbleShape(isMine: Boolean): RoundedCornerShape = if (isM
 } else {
     RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp)
 }
+
 @Composable
 fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (ChatMessage) -> Unit) {
     val isMine = message.isMine
@@ -168,7 +170,7 @@ fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (
                 .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
 
-        if (!isMine && showSenderName && message.senderName.isNotBlank()) {
+            if (!isMine && showSenderName && message.senderName.isNotBlank()) {
                 Text(
                     text = message.senderName,
                     fontSize = 12.5.sp,
@@ -180,9 +182,8 @@ fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (
 
             message.media?.let { media ->
                 MediaRenderer(
-                    media = media,
-                    messageId = message.messageId,
-                    isMine = isMine,
+                    media = media, messageId = message.messageId, isMine = isMine,
+                    sendStatus = message.status, sendProgress = message.sendProgress,
                     onClick = { onMediaClick(message) }
                 )
                 if (message.text.isNotEmpty()) Spacer(Modifier.height(6.dp))
@@ -279,6 +280,7 @@ private fun ReplySnippet(reply: ReplyPreview, isMine: Boolean) {
         }
     }
 }
+
 private val ReadTickBlue = androidx.compose.ui.graphics.Color(0xFF34B7F1)
 
 @Composable
@@ -306,6 +308,7 @@ fun StatusDot(status: MessageStatus, isMine: Boolean, modifier: Modifier = Modif
             color = ReadTickBlue
             filled = true
         }
+        MessageStatus.FAILED -> { color = MaterialTheme.colorScheme.error; filled = true }
     }
 
     val scale by animateFloatAsState(
@@ -354,7 +357,12 @@ private fun TimestampRow(message: ChatMessage, isMine: Boolean, modifier: Modifi
 }
 
 @Composable
-fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, onClick: () -> Unit) {
+fun MediaRenderer(
+    media: MediaAttachment, messageId: String, isMine: Boolean,
+    sendStatus: MessageStatus = MessageStatus.SENT, sendProgress: Int? = null,
+    onClick: () -> Unit
+) {
+    val busy = isMine && (sendStatus == MessageStatus.SENDING || sendStatus == MessageStatus.FAILED)
     val cs = MaterialTheme.colorScheme
     val contentColor = if (isMine) cs.onPrimaryContainer else cs.onSurface
 
@@ -388,6 +396,7 @@ fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, on
                 } else {
                     Icon(Icons.Filled.Download, null, modifier = Modifier.size(48.dp), tint = contentColor.copy(alpha = 0.8f))
                 }
+                if (busy) UploadBadge(sendStatus, sendProgress)
             }
         }
         MediaType.VIDEO -> {
@@ -400,7 +409,7 @@ fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, on
                     .clickable(onClick = onClick),
                 contentAlignment = Alignment.Center
             ) {
-                   if (media.thumbnail != null) {
+                if (media.thumbnail != null) {
                     coil3.compose.AsyncImage(
                         model = media.thumbnail,
                         contentDescription = null,
@@ -409,11 +418,19 @@ fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, on
                     )
                 }
                 val overlayIcon = if (media.isDownloaded) Icons.Filled.PlayCircle else Icons.Filled.Download
-                Box(
-                    modifier = Modifier.size(48.dp).clip(CircleShape).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(overlayIcon, null, tint = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(28.dp))
+                if (busy) UploadBadge(sendStatus, sendProgress) else {
+                    Box(
+                        modifier = Modifier.size(48.dp).clip(CircleShape)
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            overlayIcon,
+                            null,
+                            tint = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }
@@ -421,15 +438,31 @@ fun MediaRenderer(media: MediaAttachment, messageId: String, isMine: Boolean, on
             media = media,
             messageId = messageId,
             contentColor = contentColor,
-            onClick = onClick
+            onClick = onClick,
+            sendStatus = if (busy) sendStatus else MessageStatus.SENT, sendProgress = sendProgress
         )
+
         MediaType.DOCUMENT -> {
-            Row(modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(contentColor.copy(alpha = 0.06f)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(modifier = Modifier.size(36.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-                    Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = contentColor, modifier = Modifier.size(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(contentColor.copy(alpha = 0.06f)).clickable(onClick = onClick).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(36.dp).clip(CircleShape).background(contentColor.copy(alpha = 0.12f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (busy) InlineUploadRing(sendStatus, sendProgress, contentColor, 28.dp)
+                    else Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = contentColor, modifier = Modifier.size(20.dp))
                 }
                 Spacer(Modifier.width(12.dp))
-                Text(media.fileName ?: "Document", color = contentColor, fontWeight = FontWeight.Medium, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Column(Modifier.weight(1f, fill = false)) {
+                    Text(media.fileName ?: "Document", color = contentColor, fontWeight = FontWeight.Medium,
+                        fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (busy) sendLabel(sendStatus, sendProgress)?.let {
+                        Text(it, color = contentColor.copy(alpha = 0.6f), fontSize = 11.sp)
+                    }
+                }
             }
         }
         MediaType.STICKER -> {
@@ -446,8 +479,11 @@ fun VoiceMessagePlayer(
     media: MediaAttachment,
     messageId: String,
     contentColor: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    sendStatus: MessageStatus = MessageStatus.SENT,
+    sendProgress: Int? = null
 ) {
+    val busy = sendStatus == MessageStatus.SENDING || sendStatus == MessageStatus.FAILED
     val playback by VoicePlayer.state.collectAsState()
     val active = playback.messageId == messageId
     val progress = if (active && playback.durationMs > 0) {
@@ -479,6 +515,16 @@ fun VoiceMessagePlayer(
         media.durationText ?: "0:00"
     }
 
+    // Stop playback when this composable leaves composition
+    DisposableEffect(messageId) {
+        onDispose {
+            val current = VoicePlayer.state.value
+            if (current.messageId == messageId && current.playing) {
+                VoicePlayer.stop()
+            }
+        }
+    }
+
     Row(
         modifier = Modifier.widthIn(min = 220.dp).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -491,7 +537,8 @@ fun VoiceMessagePlayer(
                 .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, "Play voice message", tint = contentColor, modifier = Modifier.size(24.dp))
+            if (busy) InlineUploadRing(sendStatus, sendProgress, contentColor, 32.dp)
+            else Icon(icon, "Play voice message", tint = contentColor, modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.width(12.dp))
         Row(
@@ -511,6 +558,63 @@ fun VoiceMessagePlayer(
             }
         }
         Spacer(Modifier.width(10.dp))
-        Text(label, color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(
+            when {
+                sendStatus == MessageStatus.FAILED -> "Failed"
+                busy -> "${sendProgress ?: 0}%"
+                else -> label
+            },
+            color = contentColor, fontSize = 12.sp, fontWeight = FontWeight.Medium
+        )
     }
+}
+
+
+@Composable
+private fun BoxScope.UploadBadge(status: MessageStatus, progress: Int?) {
+    Box(
+        Modifier.matchParentSize().background(Color.Black.copy(alpha = 0.28f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (status == MessageStatus.FAILED) {
+                Icon(Icons.Filled.Refresh, "Retry", tint = Color.White, modifier = Modifier.size(26.dp))
+            } else {
+                val p = progress ?: 0
+                if (p <= 0) CircularProgressIndicator(
+                    Modifier.size(44.dp), color = Color.White, strokeWidth = 3.dp
+                ) else CircularProgressIndicator(
+                    progress = { p / 100f }, modifier = Modifier.size(44.dp),
+                    color = Color.White, trackColor = Color.White.copy(alpha = 0.25f), strokeWidth = 3.dp
+                )
+                Icon(Icons.Filled.Close, "Cancel", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineUploadRing(status: MessageStatus, progress: Int?, tint: Color, ringSize: Dp) {
+    Box(Modifier.size(ringSize), contentAlignment = Alignment.Center) {
+        if (status == MessageStatus.FAILED) {
+            Icon(Icons.Filled.Refresh, "Retry", tint = tint, modifier = Modifier.size(ringSize * 0.6f))
+        } else {
+            val p = progress ?: 0
+            if (p <= 0) CircularProgressIndicator(Modifier.fillMaxSize(), color = tint, strokeWidth = 2.5.dp)
+            else CircularProgressIndicator(
+                progress = { p / 100f }, modifier = Modifier.fillMaxSize(),
+                color = tint, trackColor = tint.copy(alpha = 0.2f), strokeWidth = 2.5.dp
+            )
+            Icon(Icons.Filled.Close, "Cancel", tint = tint, modifier = Modifier.size(ringSize * 0.4f))
+        }
+    }
+}
+
+private fun sendLabel(status: MessageStatus, progress: Int?): String? = when (status) {
+    MessageStatus.FAILED -> "Failed · tap to retry"
+    MessageStatus.SENDING -> if ((progress ?: 0) > 0) "Sending $progress%" else "Sending…"
+    else -> null
 }

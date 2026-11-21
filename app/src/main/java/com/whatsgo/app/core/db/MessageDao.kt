@@ -60,6 +60,14 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
     @Query("UPDATE messages SET status = 'read' WHERE chatJid = :chatJid AND fromMe = 1 AND status != 'read'")
     suspend fun markAllSentRead(chatJid: String)
 
+    @Query("DELETE FROM messages WHERE messageId = :id")
+    suspend fun deleteById(id: String)
+
+    // app killed mid-upload -> would show "sending" forever
+    @Query("""UPDATE messages SET status = 'failed'
+              WHERE status = 'sending' AND fromMe = 1 AND mediaType IS NOT NULL""")
+    suspend fun failStaleSending()
+
     @Query("""
     SELECT messageId, senderJid FROM messages
     WHERE chatJid = :chatJid AND fromMe = 0 AND isRead = 0
@@ -91,6 +99,7 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
            m.mediaType AS mediaType, m.mediaCaption AS mediaCaption,
            m.mediaLocalPath AS mediaLocalPath, m.mediaThumbnail AS mediaThumbnail,
            m.mediaSeconds AS mediaSeconds, m.mediaWaveform AS mediaWaveform, m.mediaAnimated AS mediaAnimated,
+           m.mediaFileName AS mediaFileName, m.mediaMimetype AS mediaMimetype,
            c.name AS senderName,
            q.text AS origText, q.fromMe AS origFromMe, q.senderJid AS origSenderJid,
            q.mediaType AS origMediaType, qc.name AS origSenderName

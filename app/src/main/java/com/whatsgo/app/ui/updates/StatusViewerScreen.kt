@@ -412,8 +412,10 @@ private fun VideoStatusContent(
     }
 
     val exoPlayer = remember(localPath) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.fromFile(File(localPath))))
+        val ctx = context
+        ExoPlayer.Builder(ctx).build().apply {
+            val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", File(localPath))
+            setMediaItem(MediaItem.fromUri(uri))
             prepare()
             playWhenReady = true
         }
