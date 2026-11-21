@@ -154,6 +154,7 @@ func (c *Client) SendAudioMessage(chatJid, filePath string, seconds int64, ptt b
 	}
 	ctx, done := beginUpload(localID)
 	defer done()
+	fwd := forwardCtx(localID)
 
 	up, sniffed, err := c.uploadFile(ctx, localID, filePath, whatsmeow.MediaAudio)
 	if err != nil {
@@ -176,6 +177,7 @@ func (c *Client) SendAudioMessage(chatJid, filePath string, seconds int64, ptt b
 		FileLength:    proto.Uint64(up.FileLength),
 		Seconds:       proto.Uint32(uint32(seconds)),
 		PTT:           proto.Bool(ptt),
+		ContextInfo: fwd,
 	}
 	if len(waveform) > 0 {
 		audio.Waveform = waveform
@@ -198,6 +200,7 @@ func (c *Client) SendDocumentMessage(chatJid, filePath, fileName, mimeType, capt
 	}
 	ctx, done := beginUpload(localID)
 	defer done()
+	fwd := forwardCtx(localID)
 
 	up, sniffed, err := c.uploadFile(ctx, localID, filePath, whatsmeow.MediaDocument)
 	if err != nil {
@@ -220,6 +223,7 @@ func (c *Client) SendDocumentMessage(chatJid, filePath, fileName, mimeType, capt
 		FileEncSHA256: up.FileEncSHA256,
 		FileSHA256:    up.FileSHA256,
 		FileLength:    proto.Uint64(up.FileLength),
+		ContextInfo: fwd,
 	}}
 	sent, err := c.inner.SendMessage(ctx, jid, msg)
 	if err != nil {
@@ -239,6 +243,7 @@ func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail [
 	}
 	ctx, done := beginUpload(localID)
 	defer done()
+	fwd := forwardCtx(localID)
 
 	up, mimetype, err := c.uploadFile(ctx, localID, filePath, mediaType)
 	if err != nil {
@@ -259,6 +264,8 @@ func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail [
 				FileLength:    proto.Uint64(up.FileLength),
 				Caption:       proto.String(caption),
 				JPEGThumbnail: thumbnail,
+				ContextInfo: fwd,
+
 			},
 		}
 	case whatsmeow.MediaVideo:
@@ -273,6 +280,7 @@ func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail [
 				FileLength:    proto.Uint64(up.FileLength),
 				Caption:       proto.String(caption),
 				JPEGThumbnail: thumbnail,
+				ContextInfo: fwd,
 			},
 		}
 	default:
@@ -286,10 +294,6 @@ func (c *Client) sendMediaMessage(chatJid, filePath, caption string, thumbnail [
 	}
 	return result(sent.ID, sent.Timestamp.Unix()), nil
 }
-
-// ---------------------------------------------------------------------------
-// Download (unchanged)
-// ---------------------------------------------------------------------------
 
 func (c *Client) DownloadMedia(mediaType, url, directPath string, mediaKey, fileEncSHA256, fileSHA256 []byte, fileLength int64, outPath string) error {
 	var downloadable whatsmeow.DownloadableMessage

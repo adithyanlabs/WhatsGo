@@ -9,5 +9,6 @@ data class ChatSummary(
     val senderJid: String = "",
     val senderName: String? = null,
     val status: String = "sent",
-    val mediaType: String? = null
+    val mediaType: String? = null,
+    val isDeleted: Boolean = false
 )

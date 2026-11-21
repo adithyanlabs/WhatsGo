@@ -42,6 +42,15 @@ import com.whatsgo.app.core.GroupInfoData
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.combine
+
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import com.whatsgo.app.core.db.MessageDao
+import com.whatsgo.app.core.RevokeTarget
+
 private const val TYPING_HEARTBEAT_MS = 3000L
 private const val TYPING_IDLE_TIMEOUT_MS = 4000L
 private const val PAGE_SIZE = 40
@@ -76,6 +85,43 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             else list.map { m -> prog[m.messageId]?.let { m.copy(sendProgress = it) } ?: m }
         }.flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- selection ----
+    private val _selected = MutableStateFlow<Set<String>>(emptySet())
+    val selected: StateFlow<Set<String>> = _selected.asStateFlow()
+    fun startSelect(id: String) { _selected.value = setOf(id) }
+    fun toggleSelect(id: String) { _selected.update { if (id in it) it - id else it + id } }
+    fun clearSelection() { _selected.value = emptySet() }
+
+    private val _toasts = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    val toasts: SharedFlow<String> = _toasts.asSharedFlow()
+
+    val selfIsAdmin: StateFlow<Boolean> = _groupInfo
+        .map { gi -> gi?.members?.any { it.isMe && (it.isAdmin || it.isSuperAdmin) } == true }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    // ---- pinned ----
+    private val pinChat = MutableStateFlow("")
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val pinned: StateFlow<List<PinnedMessage>> = pinChat.flatMapLatest { jid ->
+        if (jid.isEmpty()) flowOf(emptyList())
+        else db.messageDao().observePinned(jid).map { rows ->
+            val now = System.currentTimeMillis()
+            rows.filter { it.pinExpiresAt == 0L || it.pinExpiresAt > now }
+                .map { PinnedMessage(it.messageId, pinPreview(it), it.fromMe, it.pinExpiresAt) }
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun pinPreview(r: MessageDao.PinRow): String = when (r.mediaType) {
+        null -> r.text
+        "image" -> r.mediaCaption?.takeIf { it.isNotBlank() }?.let { "Photo · $it" } ?: "Photo"
+        "video" -> r.mediaCaption?.takeIf { it.isNotBlank() }?.let { "Video · $it" } ?: "Video"
+        "voice" -> "Voice message"
+        "audio" -> "Audio"
+        "document" -> r.mediaFileName ?: "Document"
+        else -> "Sticker"
+    }
 
     private val _presenceSubtitle = MutableStateFlow<String?>(null)
     val presenceSubtitle: StateFlow<String?> = _presenceSubtitle.asStateFlow()
@@ -143,6 +189,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             limitFlow.value = PAGE_SIZE
             startPresenceCollect()
             startMessageCollect(chatJid)
+            clearSelection()
+            pinChat.value = chatJid
+            viewModelScope.launch(Dispatchers.IO) { db.messageDao().expirePins(System.currentTimeMillis()) }
         }
         markIncomingAsRead(chatJid)
     }
@@ -178,6 +227,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     page.items.filter { it.media?.type == MediaType.STICKER && !it.media.isDownloaded }
                         .forEach { if (stickerRequested.add(it.messageId)) downloadMedia(it) }
                     if (page.hasUnread && currentChatJid == chatJid) markIncomingAsRead(chatJid)
+                    val ids = page.items.mapTo(HashSet()) { it.messageId }
+                    _selected.update { s -> if (s.all { it in ids }) s else s.filterTo(HashSet()) { it in ids } }
                 }
         }
     }
@@ -283,12 +334,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             messageId = messageId,
             senderJid = senderJid,
             senderName = name,
-            text = if (media != null) (mediaCaption ?: "") else text,
+            text = if (isDeleted) "" else if (media != null) (mediaCaption ?: "") else text,
             time = timeFmt.get()!!.format(Date(timestamp * 1000)),
             isMine = fromMe,
             status = mapped,
-            replyTo = reply,
-            media = media
+            replyTo = if (isDeleted) null else reply,
+            media = if (isDeleted) null else media,
+            timestamp = timestamp,
+            isDeleted = isDeleted,
+            isForwarded = isForwarded,
+            isPinned = isPinned
         )
     }
 
@@ -418,6 +473,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         readJob?.cancel()
         readJob = null
         _presenceSubtitle.value = null
+        clearSelection(); pinChat.value = ""
     }
 
     override fun onCleared() {
@@ -575,4 +631,40 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    fun deleteForMe(ids: Set<String>) { session.deleteForMe(ids.toList()); clearSelection() }
+
+    fun deleteForEveryone(msgs: List<ChatMessage>) {
+        session.deleteForEveryone(currentChatJid, msgs.map { RevokeTarget(it.messageId, it.senderJid, it.isMine) })
+        clearSelection()
+    }
+
+    fun forward(ids: Set<String>, chats: List<String>) { session.forwardMessages(ids.toList(), chats); clearSelection() }
+
+    fun pin(m: ChatMessage, secs: Long) {
+        val chat = currentChatJid
+        clearSelection()
+        viewModelScope.launch(Dispatchers.IO) {
+            if (db.messageDao().countPinned(chat, System.currentTimeMillis()) >= MAX_PINS) {
+                _toasts.tryEmit("You can pin up to $MAX_PINS messages. Unpin one first.")
+                return@launch
+            }
+            session.pinMessage(chat, m.messageId, m.senderJid, m.isMine, secs)
+        }
+    }
+
+    fun unpin(m: ChatMessage) {
+        clearSelection()
+        session.unpinMessage(currentChatJid, m.messageId, m.senderJid, m.isMine)
+    }
+
+    fun observeInfo(messageId: String): kotlinx.coroutines.flow.Flow<List<InfoRow>> =
+        combine(db.receiptDao().observe(messageId), db.contactDao().observeAll()) { receipts, contacts ->
+            val names = contacts.associate { it.jid to it.name }
+            receipts.map { r ->
+                val saved = names[r.jid]?.takeIf { it.isNotBlank() && !PhoneFormatter.isPhoneLike(it) }
+                InfoRow(r.jid, saved ?: PhoneFormatter.format(getApplication(), r.jid), r.deliveredAt, r.readAt)
+            }
+        }.flowOn(Dispatchers.Default)
+
 }

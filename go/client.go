@@ -31,7 +31,6 @@ type LoginCallback interface {
 	OnAudioMessage(chatJID string, senderJID string, messageID string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, seconds int64, ptt bool, waveform []byte, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 	OnStickerMessage(chatJID string, senderJID string, messageID string, timestamp int64, fromMe bool, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, animated bool, width int64, height int64, quotedID string, quotedText string, quotedSenderJID string, senderPushName string)
 	OnFavoriteSticker(url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileLength int64, mimetype string, animated bool, width int64, height int64)
-
 	OnStatusMessage(statusID string, senderJID string, senderName string, timestamp int64, fromMe bool, mediaType string, text string, backgroundColor int64, url string, directPath string, mediaKey []byte, fileEncSHA256 []byte, fileSHA256 []byte, fileLength int64, mimetype string, thumbnail []byte)
 	OnStatusViewed(statusID string, viewerJID string)
 	OnHistoryContact(jid string, name string)
@@ -45,6 +44,11 @@ type LoginCallback interface {
 	OnPresence(senderJID string, online bool, lastSeen int64)
 	OnChannelEvent(kind string, jid string)
 	OnUploadProgress(localID string, percent int64)
+
+	OnMessageRevoked(chatJID string, messageID string, byJID string)
+    OnMessagePinned(chatJID string, messageID string, pinned bool, pinnedAt int64, expiresAt int64)
+    OnMessageForwarded(messageID string)
+    OnReceiptInfo(messageID string, jid string, kind string, timestamp int64)
 }
 
 type Client struct {

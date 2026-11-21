@@ -73,6 +73,8 @@ import kotlinx.coroutines.cancel
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import androidx.compose.animation.Crossfade
+import com.whatsgo.app.ui.home.ChatListViewModel
 
 private suspend fun getAudioDuration(context: Context, filePath: String): Int =
     withContext(Dispatchers.IO) {
@@ -346,6 +348,19 @@ fun ConversationScreen(
     }
 
     val messages by viewModel.messages.collectAsState()
+    val selected by viewModel.selected.collectAsState()
+    val selectionMode = selected.isNotEmpty()
+    val pinned by viewModel.pinned.collectAsState()
+    val selfIsAdmin by viewModel.selfIsAdmin.collectAsState()
+    val selectedMsgs = remember(messages, selected) { messages.filter { it.messageId in selected } }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showPinDialog by remember { mutableStateOf(false) }
+    var showForwardSheet by remember { mutableStateOf(false) }
+    var infoFor by remember { mutableStateOf<ChatMessage?>(null) }
+
+    LaunchedEffect(Unit) {
+        viewModel.toasts.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
     var replyingTo by remember { mutableStateOf<ChatMessage?>(null) }
     var showMediaSheet by remember { mutableStateOf(false) }
     var showProfile by remember { mutableStateOf(false) }
@@ -359,7 +374,7 @@ fun ConversationScreen(
     var isBackInProgress by remember { mutableStateOf(false) }
     val isGroup by viewModel.isGroup.collectAsState()
 
-    PredictiveBackHandler(enabled = true) { progressFlow ->
+    PredictiveBackHandler(enabled = !selectionMode) { progressFlow ->
         try {
             isBackInProgress = true
             progressFlow.collect { backEvent -> backProgress = backEvent.progress }
@@ -370,6 +385,7 @@ fun ConversationScreen(
             isBackInProgress = false
         }
     }
+    BackHandler(enabled = selectionMode) { viewModel.clearSelection() }
 
     val newest = messages.firstOrNull()
     val newestId = newest?.messageId
@@ -480,24 +496,56 @@ fun ConversationScreen(
         Scaffold(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             topBar = {
-                ConversationTopBar(
-                    profile = profile,
-                    onBack = onBack,
-                    onProfileClick = {
-                        android.util.Log.d("ChannelUI", "profile click readOnly=$readOnly")
-                        coroutineScope.launch {
-                            if (isKeyboardOpen) {
-                                keyboardController?.hide()
-                                delay(290.milliseconds)
-                            }
-                            when {
-                                readOnly -> showChannelProfile = true
-                                isGroup -> showGroupProfile = true
-                                else -> showProfile = true
-                            }
+                Column {
+                    Crossfade(targetState = selectionMode, animationSpec = tween(150), label = "topbar") { selecting ->
+                        if (selecting) {
+                            val single = selectedMsgs.singleOrNull()
+                            val liveOk = selectedMsgs.none { it.messageId.startsWith("local_") }
+                            SelectionTopBar(
+                                count = selected.size,
+                                canPin = !readOnly && single != null && !single.isDeleted && liveOk,
+                                isPinned = single?.isPinned == true,
+                                canInfo = single != null && single.isMine && !single.isDeleted && liveOk && !readOnly,
+                                canForward = selectedMsgs.isNotEmpty() && liveOk &&
+                                        selectedMsgs.all { !it.isDeleted },
+                                onClose = { viewModel.clearSelection() },
+                                onPin = {
+                                    single?.let { if (it.isPinned) viewModel.unpin(it) else showPinDialog = true }
+                                },
+                                onInfo = { infoFor = single; viewModel.clearSelection() },
+                                onForward = { showForwardSheet = true },
+                                onDelete = { showDeleteDialog = true },
+
+                                )
+                        } else {
+                            ConversationTopBar(
+                                profile = profile,
+                                onBack = onBack,
+                                onProfileClick = {
+                                    android.util.Log.d("ChannelUI", "profile click readOnly=$readOnly")
+                                    coroutineScope.launch {
+                                        if (isKeyboardOpen) {
+                                            keyboardController?.hide()
+                                            delay(290.milliseconds)
+                                        }
+                                        when {
+                                            readOnly -> showChannelProfile = true
+                                            isGroup -> showGroupProfile = true
+                                            else -> showProfile = true
+                                        }
+                                    }
+                                }
+                            )
                         }
                     }
-                )
+                    PinnedBanner(pinned) { p ->
+                        coroutineScope.launch {
+                            val idx = messages.indexOfFirst { it.messageId == p.messageId }
+                            if (idx >= 0) listState.animateScrollToItem(idx)
+                            else Toast.makeText(context, "Scroll up to load that message", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
             },
             bottomBar = {
                 if (!readOnly) {
@@ -543,6 +591,9 @@ fun ConversationScreen(
                 onReplySwipe = { replyingTo = it },
                 showSenderNames = isGroup,
                 onLoadMore = viewModel::loadMore,
+                selected = selected,
+                onLongPress = { if (!readOnly) viewModel.startSelect(it.messageId) },
+                onToggle = { viewModel.toggleSelect(it.messageId) },
                 onMediaClick = { msg ->
                     val media = msg.media
                     when {
@@ -626,6 +677,54 @@ fun ConversationScreen(
                 onDismiss = { showGroupProfile = false }
             )
         }
+
+        if (showDeleteDialog) {
+            val nowSec = System.currentTimeMillis() / 1000
+            val canEveryone = selectedMsgs.isNotEmpty() && selectedMsgs.all { m ->
+                !m.isDeleted && !m.messageId.startsWith("local_") && !readOnly &&
+                        if (m.isMine) nowSec - m.timestamp <= DELETE_WINDOW_SEC
+                        else isGroup && selfIsAdmin
+            }
+            DeleteMessagesDialog(
+                count = selected.size,
+                canForEveryone = canEveryone,
+                onForMe = { showDeleteDialog = false; viewModel.deleteForMe(selected) },
+                onForEveryone = { showDeleteDialog = false; viewModel.deleteForEveryone(selectedMsgs) },
+                onDismiss = { showDeleteDialog = false }
+            )
+        }
+
+        if (showPinDialog) {
+            PinDurationDialog(
+                onPin = { secs ->
+                    showPinDialog = false
+                    selectedMsgs.singleOrNull()?.let { viewModel.pin(it, secs) }
+                },
+                onDismiss = { showPinDialog = false }
+            )
+        }
+
+        if (showForwardSheet) {
+            val listVm: ChatListViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            val allChats by listVm.chats.collectAsState()
+            ForwardSheet(
+                chats = allChats,
+                count = selected.size,
+                onDismiss = { showForwardSheet = false },
+                onSend = { targets ->
+                    showForwardSheet = false
+                    viewModel.forward(selected, targets)
+                }
+            )
+        }
+
+        infoFor?.let { m ->
+            val live = messages.firstOrNull { it.messageId == m.messageId } ?: m
+            val rows by remember(m.messageId) { viewModel.observeInfo(m.messageId) }
+                .collectAsState(initial = emptyList())
+            MessageInfoSheet(message = live, isGroup = isGroup, rows = rows, onDismiss = { infoFor = null })
+        }
+
         showAudioTypeDialog?.let { audio ->
             AlertDialog(
                 onDismissRequest = {

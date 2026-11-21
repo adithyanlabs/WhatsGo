@@ -26,5 +26,8 @@ data class MessageRow(
     val mediaWaveform: ByteArray?,
     val mediaAnimated: Boolean,
     val mediaFileName: String?,
-    val mediaMimetype: String?
+    val mediaMimetype: String?,
+    val isDeleted: Boolean,
+    val isForwarded: Boolean,
+    val isPinned: Boolean
 )

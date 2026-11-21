@@ -81,18 +81,25 @@ func (c *Client) processEvent(evt interface{}) {
 		}
 		if e.Type == types.ReceiptTypeDelivered || e.Type == types.ReceiptTypeRead || e.Type == types.ReceiptTypeReadSelf {
 
-        	status := "delivered"
-        	switch {
-        	case e.Type == types.ReceiptTypeReadSelf,
-        		e.Type == types.ReceiptTypeRead && e.IsFromMe:
-        		status = "read_self"
-        	case e.Type == types.ReceiptTypeRead:
-        		status = "read"
-        	}
-        	for _, msgID := range e.MessageIDs {
-        		c.cb.OnMessageStatus(msgID, status)
-        	}
-        }
+			status := "delivered"
+			switch {
+			case e.Type == types.ReceiptTypeReadSelf,
+				e.Type == types.ReceiptTypeRead && e.IsFromMe:
+				status = "read_self"
+			case e.Type == types.ReceiptTypeRead:
+				status = "read"
+			}
+			for _, msgID := range e.MessageIDs {
+				c.cb.OnMessageStatus(msgID, status)
+				if !e.IsFromMe && (e.Type == types.ReceiptTypeDelivered || e.Type == types.ReceiptTypeRead) {
+					kind := "delivered"
+					if e.Type == types.ReceiptTypeRead {
+						kind = "read"
+					}
+					c.cb.OnReceiptInfo(msgID, c.normJID(e.Sender).String(), kind, e.Timestamp.Unix())
+				}
+			}
+		}
 
 	case *events.ChatPresence:
 		chat := c.normJID(e.Chat).String()

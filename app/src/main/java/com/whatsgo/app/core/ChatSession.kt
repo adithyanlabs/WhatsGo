@@ -52,6 +52,7 @@ sealed class LoginEvent {
     data class PresenceUpdated(val senderJid: String, val online: Boolean, val lastSeen: Long) : LoginEvent()
 }
 
+class RevokeTarget(val messageId: String, val senderJid: String, val fromMe: Boolean)
 private const val STATUS_TTL_MS = 24L * 60 * 60 * 1000
 
 class ChatSession(dbPath: String, context: Context) {
@@ -103,6 +104,11 @@ class ChatSession(dbPath: String, context: Context) {
         class HistoryChat(val chatJid: String, val name: String, val unread: Int) : Op()
         class ChatRead(val chatJid: String, val ts: Long) : Op()
         data object OfflineDone : Op()
+
+        class Revoke(val id: String) : Op()
+        class Pin(val id: String, val pinned: Boolean, val at: Long, val exp: Long) : Op()
+        class Forwarded(val id: String) : Op()
+        class Receipt(val id: String, val jid: String, val kind: String, val ts: Long) : Op()
     }
 
     private val http = okhttp3.OkHttpClient()
@@ -391,6 +397,14 @@ class ChatSession(dbPath: String, context: Context) {
         override fun onStatusViewed(statusID: String, viewerJID: String) {
             ops.trySend(Op.StatusViewed(statusID, viewerJID))
         }
+        override fun onMessageRevoked(chatJID: String, messageID: String, byJID: String) { ops.trySend(Op.Revoke(messageID)) }
+        override fun onMessagePinned(chatJID: String, messageID: String, pinned: Boolean, pinnedAt: Long, expiresAt: Long) {
+            ops.trySend(Op.Pin(messageID, pinned, pinnedAt, expiresAt))
+        }
+        override fun onMessageForwarded(messageID: String) { ops.trySend(Op.Forwarded(messageID)) }
+        override fun onReceiptInfo(messageID: String, jid: String, kind: String, timestamp: Long) {
+            ops.trySend(Op.Receipt(messageID, jid, kind, timestamp))
+        }
     }
 
     private val client: Client = Engine.newClient(dbPath, callback)
@@ -445,6 +459,17 @@ class ChatSession(dbPath: String, context: Context) {
                                 HistorySyncService.finishOffline()
                                 scope.launch { syncGroupNames() }
                             }
+                            is Op.Revoke -> {
+                                flush(batch)
+                                db.messageDao().markDeleted(cur.id)
+                                db.receiptDao().deleteFor(listOf(cur.id))
+                            }
+                            is Op.Pin -> {
+                                flush(batch)
+                                db.messageDao().setPinned(cur.id, cur.pinned, if (cur.pinned) cur.at * 1000 else 0L, cur.exp * 1000)
+                            }
+                            is Op.Forwarded -> { flush(batch); db.messageDao().setForwarded(cur.id) }
+                            is Op.Receipt -> db.receiptDao().upsert(cur.id, cur.jid, cur.ts, if (cur.kind == "read") cur.ts else 0L)
                         }
                         cur = ops.tryReceive().getOrNull()
                     }
@@ -581,12 +606,15 @@ class ChatSession(dbPath: String, context: Context) {
                 val old = existing[e.messageId]
                 when {
                     old == null -> db.messageDao().insert(e)
+                    old.isDeleted -> Unit
                     e.mediaType == null -> Unit
                     else -> db.messageDao().insert(
                         e.copy(
                             isRead = old.isRead || e.isRead,
                             mediaLocalPath = old.mediaLocalPath ?: e.mediaLocalPath,
-                            status = old.status
+                            status = old.status,
+                            isForwarded = e.isForwarded || old.isForwarded,
+                            isPinned = old.isPinned, pinnedAt = old.pinnedAt, pinExpiresAt = old.pinExpiresAt
                         )
                     )
                 }
@@ -857,6 +885,7 @@ class ChatSession(dbPath: String, context: Context) {
         if (!messageId.startsWith("local_")) return
         scope.launch {
             val e = db.messageDao().getById(messageId) ?: return@launch
+            if (e.isForwarded) client.markForwarded(messageId)
             val path = e.mediaLocalPath
             if (path == null || !File(path).exists()) {
                 _events.tryEmit(LoginEvent.Error("File no longer available"))
@@ -987,6 +1016,185 @@ class ChatSession(dbPath: String, context: Context) {
     }
 
     private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+
+    // ---- delete ----
+    fun deleteForMe(ids: List<String>) {
+        scope.launch {
+            db.withTransaction {
+                db.messageDao().deleteByIds(ids)
+                db.receiptDao().deleteFor(ids)
+            }
+        }
+    }
+
+    fun deleteForEveryone(chatJid: String, targets: List<RevokeTarget>) {
+        scope.launch {
+            var failed = 0
+            for (t in targets) {
+                if (t.messageId.startsWith("local_")) { db.messageDao().deleteByIds(listOf(t.messageId)); continue }
+                try {
+                    client.deleteForEveryone(chatJid, if (t.fromMe) "" else t.senderJid, t.messageId)
+                    db.messageDao().markDeleted(t.messageId)
+                } catch (e: Exception) {
+                    failed++
+                    Log.e("ChatSession", "revoke failed", e)
+                }
+            }
+            if (failed > 0) _events.tryEmit(LoginEvent.Error("Couldn't delete $failed message(s)"))
+        }
+    }
+
+    // ---- pin ----
+    fun pinMessage(chatJid: String, messageId: String, senderJid: String, fromMe: Boolean, durationSecs: Long) {
+        scope.launch {
+            try {
+                client.pinMessage(chatJid, if (fromMe) "" else senderJid, messageId, true, durationSecs)
+                val now = System.currentTimeMillis()
+                db.messageDao().setPinned(messageId, true, now, now + durationSecs * 1000)
+            } catch (e: Exception) {
+                Log.e("ChatSession", "pin failed", e)
+                _events.tryEmit(LoginEvent.Error("Couldn't pin message"))
+            }
+        }
+    }
+
+    fun unpinMessage(chatJid: String, messageId: String, senderJid: String, fromMe: Boolean) {
+        scope.launch {
+            try {
+                client.pinMessage(chatJid, if (fromMe) "" else senderJid, messageId, false, 0L)
+                db.messageDao().setPinned(messageId, false, 0L, 0L)
+            } catch (e: Exception) {
+                Log.e("ChatSession", "unpin failed", e)
+                _events.tryEmit(LoginEvent.Error("Couldn't unpin message"))
+            }
+        }
+    }
+
+    // ---- forward ----
+    fun forwardMessages(ids: List<String>, targets: List<String>) {
+        scope.launch {
+            val sources = db.messageDao().getByIds(ids)            // oldest first
+            for (target in targets) for (src in sources) {
+                if (src.isDeleted) continue
+                if (src.mediaType == null) forwardText(src, target) else forwardMedia(src, target)
+            }
+        }
+    }
+
+    private suspend fun forwardText(src: MessageEntity, target: String) {
+        val tempId = newLocalId()
+        db.messageDao().insert(
+            MessageEntity(
+                messageId = tempId, chatJid = target, senderJid = client.getOwnJID(),
+                text = src.text, timestamp = nowSec(), fromMe = true, isRead = true,
+                status = "sending", isForwarded = true
+            )
+        )
+        try {
+            val parts = client.sendForwardedText(target, src.text).split("|")
+            val realId = parts.getOrNull(0)
+            val ts = parts.getOrNull(1)?.toLongOrNull()
+            if (realId != null && ts != null) {
+                db.messageDao().reconcileMessageId(tempId, realId, ts)
+                db.messageDao().setStatus(realId, "sent")
+            }
+        } catch (e: Exception) {
+            db.messageDao().setStatus(tempId, "failed")
+            _events.tryEmit(LoginEvent.Error(e.message ?: "forward_failed"))
+        }
+    }
+
+    private fun extFor(type: String?, fileName: String?): String = when (type) {
+        "video" -> "mp4"
+        "voice" -> "ogg"
+        "sticker" -> "webp"
+        "audio", "document" ->
+            fileName?.substringAfterLast('.', "")?.takeIf { it.isNotBlank() } ?: if (type == "audio") "ogg" else "bin"
+        else -> "jpg"
+    }
+
+    private fun ensureLocalMedia(src: MessageEntity): String? {
+        src.mediaLocalPath?.takeIf { File(it).exists() }?.let { return it }
+        val type = src.mediaType ?: return null
+        val key = src.mediaKey ?: return null
+        val out = File(appContext.cacheDir, "fwd_src_${src.messageId}.${extFor(type, src.mediaFileName)}")
+        val ok = downloadMedia(
+            type, src.mediaUrl ?: "", src.mediaDirectPath ?: "", key,
+            src.mediaFileEncSha256 ?: ByteArray(0), src.mediaFileSha256 ?: ByteArray(0),
+            src.mediaFileLength ?: 0L, src.messageId, out.absolutePath
+        )
+        return if (ok) out.absolutePath else null
+    }
+
+    private suspend fun forwardMedia(src: MessageEntity, target: String) {
+        if (src.mediaType == "sticker") { forwardSticker(src, target); return }
+
+        val source = ensureLocalMedia(src)
+        if (source == null) {
+            _events.tryEmit(LoginEvent.Error("Media is no longer available to forward"))
+            return
+        }
+        val copy = File(appContext.cacheDir, "fwd_${System.nanoTime()}.${extFor(src.mediaType, src.mediaFileName)}")
+        runCatching { File(source).copyTo(copy, overwrite = true) }
+            .onFailure { _events.tryEmit(LoginEvent.Error("Couldn't prepare file")); return }
+
+        val tempId = newLocalId()
+        db.messageDao().insert(
+            MessageEntity(
+                messageId = tempId, chatJid = target, senderJid = client.getOwnJID(),
+                text = src.mediaCaption ?: "", timestamp = nowSec(), fromMe = true, isRead = true,
+                mediaType = src.mediaType, mediaCaption = src.mediaCaption, mediaMimetype = src.mediaMimetype,
+                mediaLocalPath = copy.absolutePath, mediaThumbnail = src.mediaThumbnail,
+                mediaFileName = src.mediaFileName, mediaSeconds = src.mediaSeconds,
+                mediaWaveform = src.mediaWaveform, status = "sending", isForwarded = true
+            )
+        )
+        val path = copy.absolutePath
+        val thumb = src.mediaThumbnail ?: ByteArray(0)
+        runUpload(tempId, "forward") {
+            client.markForwarded(tempId)
+            when (src.mediaType) {
+                "image" -> client.sendImageMessage(target, path, src.mediaCaption ?: "", thumb, tempId)
+                "video" -> client.sendVideoMessage(target, path, src.mediaCaption ?: "", thumb, tempId)
+                "document" -> client.sendDocumentMessage(target, path, src.mediaFileName ?: "document", src.mediaMimetype ?: "", src.mediaCaption ?: "", tempId)
+                "voice" -> client.sendAudioMessage(target, path, (src.mediaSeconds ?: 1).toLong(), true, src.mediaWaveform ?: ByteArray(0), "audio/ogg; codecs=opus", tempId)
+                "audio" -> client.sendAudioMessage(target, path, (src.mediaSeconds ?: 0).toLong(), false, src.mediaWaveform ?: ByteArray(0), src.mediaMimetype ?: "", tempId)
+                else -> error("unsupported media type")
+            }
+        }
+    }
+
+    private suspend fun forwardSticker(src: MessageEntity, target: String) {
+        val path = ensureLocalMedia(src)
+        if (path == null) {
+            _events.tryEmit(LoginEvent.Error("Sticker is no longer available to forward"))
+            return
+        }
+        val info = StickerFiles.info(path)
+        val tempId = newLocalId()
+        db.messageDao().insert(
+            MessageEntity(
+                messageId = tempId, chatJid = target, senderJid = client.getOwnJID(),
+                text = "", timestamp = nowSec(), fromMe = true, isRead = true,
+                mediaType = "sticker", mediaMimetype = "image/webp",
+                mediaLocalPath = path, mediaAnimated = info.animated, status = "sending"
+            )
+        )
+        try {
+            val parts = client.sendStickerMessage(
+                target, path, info.animated, info.width.toLong(), info.height.toLong()
+            ).split("|")
+            val realId = parts.getOrNull(0)
+            val ts = parts.getOrNull(1)?.toLongOrNull()
+            if (realId != null && ts != null) {
+                db.messageDao().reconcileMessageId(tempId, realId, ts)
+                db.messageDao().setStatus(realId, "sent")
+            }
+        } catch (e: Exception) {
+            db.messageDao().setStatus(tempId, "failed")
+            _events.tryEmit(LoginEvent.Error(e.message ?: "forward_failed"))
+        }
+    }
 
     private fun saveSticker(
         url: String, directPath: String, mediaKey: ByteArray?, encSha: ByteArray?, sha: ByteArray?,

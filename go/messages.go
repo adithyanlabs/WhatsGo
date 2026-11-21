@@ -6,7 +6,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 )
 
-func (c *Client) dispatchMessage(e *events.Message) {
+func (c *Client) dispatchContent(e *events.Message) {
 	if e.Info.Chat.User == "status" && e.Info.Chat.Server == types.BroadcastServer {
 		c.handleStatusMessage(e)
 		return

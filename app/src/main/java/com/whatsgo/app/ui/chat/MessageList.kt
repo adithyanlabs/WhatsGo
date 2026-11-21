@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.whatsgo.app.ui.chat
 
 import androidx.compose.animation.*
@@ -51,6 +52,10 @@ import androidx.compose.foundation.text.appendInlineContent
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.material.icons.automirrored.filled.Forward
 @Composable
 fun MessageList(
     messages: List<ChatMessage>,
@@ -59,7 +64,9 @@ fun MessageList(
     showSenderNames: Boolean,
     onMediaClick: (ChatMessage) -> Unit,
     modifier: Modifier = Modifier,
-    onLoadMore: () -> Unit = {}
+    onLoadMore: () -> Unit = {},
+    selected: Set<String> = emptySet(),
+    onLongPress: (ChatMessage) -> Unit = {}, onToggle: (ChatMessage) -> Unit = {}
 ) {
     val nearEnd by remember {
         derivedStateOf {
@@ -88,6 +95,10 @@ fun MessageList(
                 message = msg,
                 onReplyTriggered = { onReplySwipe(msg) },
                 showSenderName = showSenderNames,
+                selected = msg.messageId in selected,
+                selectionMode = selected.isNotEmpty(),
+                onToggle = { onToggle(msg) },
+                onLongClick = { onLongPress(msg) },
                 onMediaClick = onMediaClick
             )
         }
@@ -95,14 +106,24 @@ fun MessageList(
 }
 
 @Composable
-fun SwipeableMessageBubble(message: ChatMessage, onReplyTriggered: () -> Unit, showSenderName: Boolean, onMediaClick: (ChatMessage) -> Unit) {
+fun SwipeableMessageBubble(
+    message: ChatMessage,
+    onReplyTriggered: () -> Unit,
+    showSenderName: Boolean,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onToggle: () -> Unit,
+    onLongClick: () -> Unit,
+    onMediaClick: (ChatMessage) -> Unit
+) {
     val maxDragPx = 120f
     val offsetX = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
     val dragProgress = (abs(offsetX.value) / maxDragPx).coerceIn(0f, 1f)
     val iconScale = 0.6f + (dragProgress * 0.4f)
+    val highlight = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = Modifier.fillMaxWidth().background(highlight)) {
         Icon(
             Icons.AutoMirrored.Filled.Reply, "Reply",
             tint = MaterialTheme.colorScheme.primary,
@@ -117,15 +138,11 @@ fun SwipeableMessageBubble(message: ChatMessage, onReplyTriggered: () -> Unit, s
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(message.isMine) {
-                    var dragTriggered = false
+                .pointerInput(message.isMine, selectionMode, message.isDeleted) {
+                    if (selectionMode || message.isDeleted) return@pointerInput
                     detectHorizontalDragGestures(
-                        onDragStart = { dragTriggered = false },
                         onDragEnd = {
-                            if (abs(offsetX.value) > maxDragPx * 0.5f) {
-                                dragTriggered = true
-                                onReplyTriggered()
-                            }
+                            if (abs(offsetX.value) > maxDragPx * 0.5f) onReplyTriggered()
                             coroutineScope.launch { offsetX.animateTo(0f, spring()) }
                         },
                         onDragCancel = { coroutineScope.launch { offsetX.animateTo(0f, spring()) } },
@@ -140,7 +157,11 @@ fun SwipeableMessageBubble(message: ChatMessage, onReplyTriggered: () -> Unit, s
             horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
         ) {
             Box(modifier = Modifier.offset { IntOffset(offsetX.value.roundToInt(), 0) }) {
-                MessageBubble(message = message, showSenderName = showSenderName, onMediaClick = onMediaClick)
+                MessageBubble(
+                    message = message, showSenderName = showSenderName,
+                    selectionMode = selectionMode, onToggle = onToggle, onLongClick = onLongClick,
+                    onMediaClick = onMediaClick
+                )
             }
         }
     }
@@ -153,84 +174,109 @@ private fun expressiveBubbleShape(isMine: Boolean): RoundedCornerShape = if (isM
 }
 
 @Composable
-fun MessageBubble(message: ChatMessage, showSenderName: Boolean, onMediaClick: (ChatMessage) -> Unit) {
+fun MessageBubble(
+    message: ChatMessage,
+    showSenderName: Boolean,
+    selectionMode: Boolean,
+    onToggle: () -> Unit,
+    onLongClick: () -> Unit,
+    onMediaClick: (ChatMessage) -> Unit
+) {
     val isMine = message.isMine
     val cs = MaterialTheme.colorScheme
     val bubbleShape = expressiveBubbleShape(isMine)
 
-    Surface(
-        shape = bubbleShape,
-        color = if (isMine) cs.primaryContainer else cs.surfaceContainerHigh,
-        tonalElevation = if (isMine) 0.dp else 1.dp,
-        modifier = Modifier.widthIn(max = 300.dp)
-    ) {
-        Column(
+    Box {
+        Surface(
+            shape = bubbleShape,
+            color = if (isMine) cs.primaryContainer else cs.surfaceContainerHigh,
+            tonalElevation = if (isMine) 0.dp else 1.dp,
             modifier = Modifier
-                .width(IntrinsicSize.Max)
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .widthIn(max = 300.dp)
+                .combinedClickable(onClick = { if (selectionMode) onToggle() }, onLongClick = onLongClick)
         ) {
-
-            if (!isMine && showSenderName && message.senderName.isNotBlank()) {
-                Text(
-                    text = message.senderName,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = cs.primary,
-                    modifier = Modifier.padding(bottom = 3.dp)
-                )
-            }
-
-            message.media?.let { media ->
-                MediaRenderer(
-                    media = media, messageId = message.messageId, isMine = isMine,
-                    sendStatus = message.status, sendProgress = message.sendProgress,
-                    onClick = { onMediaClick(message) }
-                )
-                if (message.text.isNotEmpty()) Spacer(Modifier.height(6.dp))
-            }
-
-            message.replyTo?.let { reply ->
-                ReplySnippet(reply = reply, isMine = isMine)
-                Spacer(Modifier.height(6.dp))
-            }
-
-            if (message.text.isNotEmpty()) {
-                val density = LocalDensity.current
-                val gutterDp = if (isMine) 58.dp else 44.dp
-                val gutterSp = with(density) { gutterDp.toSp() }
-                val lineSp = with(density) { 14.dp.toSp() }
-
-                val annotated = buildAnnotatedString {
-                    append(message.text)
-                    appendInlineContent("footer", " ")
-                }
-                val inlineContent = mapOf(
-                    "footer" to InlineTextContent(
-                        Placeholder(
-                            width = gutterSp,
-                            height = lineSp,
-                            placeholderVerticalAlign = PlaceholderVerticalAlign.Bottom
-                        )
-                    ) { }
-                )
-
-                Box {
+            Column(
+                modifier = Modifier
+                    .width(IntrinsicSize.Max)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                if (!isMine && showSenderName && message.senderName.isNotBlank()) {
                     Text(
-                        text = annotated,
-                        inlineContent = inlineContent,
-                        fontSize = 15.sp,
-                        lineHeight = 20.sp,
-                        color = if (isMine) cs.onPrimaryContainer else cs.onSurface
-                    )
-                    TimestampRow(
-                        message = message,
-                        isMine = isMine,
-                        modifier = Modifier.align(Alignment.BottomEnd)
+                        text = message.senderName, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                        color = cs.primary, modifier = Modifier.padding(bottom = 3.dp)
                     )
                 }
-            } else {
-                TimestampRow(message = message, isMine = isMine, modifier = Modifier.align(Alignment.End))
+
+                if (message.isDeleted) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Block, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (isMine) "You deleted this message" else "This message was deleted",
+                            fontStyle = FontStyle.Italic, fontSize = 14.sp, color = cs.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    TimestampRow(message = message, isMine = isMine, modifier = Modifier.align(Alignment.End))
+                    return@Column
+                }
+
+                if (message.isForwarded) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.Forward, null, tint = cs.onSurfaceVariant, modifier = Modifier.size(12.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Forwarded", fontStyle = FontStyle.Italic, fontSize = 11.sp, color = cs.onSurfaceVariant)
+                    }
+                }
+
+                message.media?.let { media ->
+                    MediaRenderer(
+                        media = media, messageId = message.messageId, isMine = isMine,
+                        sendStatus = message.status, sendProgress = message.sendProgress,
+                        onClick = { onMediaClick(message) }, onLongClick = onLongClick
+                    )
+                    if (message.text.isNotEmpty()) Spacer(Modifier.height(6.dp))
+                }
+
+                message.replyTo?.let { reply ->
+                    ReplySnippet(reply = reply, isMine = isMine)
+                    Spacer(Modifier.height(6.dp))
+                }
+
+                if (message.text.isNotEmpty()) {
+                    val density = LocalDensity.current
+                    val gutterDp = if (isMine) 58.dp else 44.dp
+                    val gutterSp = with(density) { (gutterDp + if (message.isPinned) 14.dp else 0.dp).toSp() }
+                    val lineSp = with(density) { 14.dp.toSp() }
+                    val annotated = buildAnnotatedString {
+                        append(message.text)
+                        appendInlineContent("footer", " ")
+                    }
+                    val inlineContent = mapOf(
+                        "footer" to InlineTextContent(
+                            Placeholder(width = gutterSp, height = lineSp, placeholderVerticalAlign = PlaceholderVerticalAlign.Bottom)
+                        ) { }
+                    )
+                    Box {
+                        Text(
+                            text = annotated, inlineContent = inlineContent,
+                            fontSize = 15.sp, lineHeight = 20.sp,
+                            color = if (isMine) cs.onPrimaryContainer else cs.onSurface
+                        )
+                        TimestampRow(message = message, isMine = isMine, modifier = Modifier.align(Alignment.BottomEnd))
+                    }
+                } else {
+                    TimestampRow(message = message, isMine = isMine, modifier = Modifier.align(Alignment.End))
+                }
             }
+        }
+        if (selectionMode) {
+            Box(
+                Modifier.matchParentSize().clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null, onClick = onToggle
+                )
+            )
         }
     }
 }
@@ -347,6 +393,11 @@ private fun TimestampRow(message: ChatMessage, isMine: Boolean, modifier: Modifi
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        if (message.isPinned) Icon(
+            Icons.Filled.PushPin, "Pinned",
+            tint = (if (isMine) cs.onPrimaryContainer else cs.onSurfaceVariant).copy(alpha = 0.6f),
+            modifier = Modifier.size(11.dp)
+        )
         Text(
             text = message.time.to12h(),
             fontSize = 10.sp,
@@ -360,7 +411,8 @@ private fun TimestampRow(message: ChatMessage, isMine: Boolean, modifier: Modifi
 fun MediaRenderer(
     media: MediaAttachment, messageId: String, isMine: Boolean,
     sendStatus: MessageStatus = MessageStatus.SENT, sendProgress: Int? = null,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
 ) {
     val busy = isMine && (sendStatus == MessageStatus.SENDING || sendStatus == MessageStatus.FAILED)
     val cs = MaterialTheme.colorScheme
@@ -374,7 +426,7 @@ fun MediaRenderer(
                     .aspectRatio(4 / 3f)
                     .clip(RoundedCornerShape(16.dp))
                     .background(contentColor.copy(alpha = 0.08f))
-                    .clickable(onClick = onClick),
+                    .combinedClickable(onClick = onClick, onLongClick = onLongClick),
                 contentAlignment = Alignment.Center
             ) {
                 val imageModel = if (media.isDownloaded && media.urlOrPath.isNotBlank()) media.urlOrPath else media.thumbnail
@@ -439,7 +491,8 @@ fun MediaRenderer(
             messageId = messageId,
             contentColor = contentColor,
             onClick = onClick,
-            sendStatus = if (busy) sendStatus else MessageStatus.SENT, sendProgress = sendProgress
+            sendStatus = if (busy) sendStatus else MessageStatus.SENT, sendProgress = sendProgress,
+            onLongClick = onLongClick
         )
 
         MediaType.DOCUMENT -> {
@@ -481,7 +534,8 @@ fun VoiceMessagePlayer(
     contentColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
     sendStatus: MessageStatus = MessageStatus.SENT,
-    sendProgress: Int? = null
+    sendProgress: Int? = null,
+    onLongClick: () -> Unit = {}
 ) {
     val busy = sendStatus == MessageStatus.SENDING || sendStatus == MessageStatus.FAILED
     val playback by VoicePlayer.state.collectAsState()
@@ -534,7 +588,7 @@ fun VoiceMessagePlayer(
                 .size(40.dp)
                 .clip(CircleShape)
                 .background(contentColor.copy(alpha = 0.15f))
-                .clickable(onClick = onClick),
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
             contentAlignment = Alignment.Center
         ) {
             if (busy) InlineUploadRing(sendStatus, sendProgress, contentColor, 32.dp)

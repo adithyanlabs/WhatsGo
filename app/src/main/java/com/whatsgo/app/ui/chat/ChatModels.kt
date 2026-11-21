@@ -71,7 +71,11 @@ data class ChatMessage(
     val status: MessageStatus = MessageStatus.SENT,
     val replyTo: ReplyPreview? = null,
     val media: MediaAttachment? = null,
-    val sendProgress: Int? = null
+    val sendProgress: Int? = null,
+    val timestamp: Long = 0L,
+    val isDeleted: Boolean = false,
+    val isForwarded: Boolean = false,
+    val isPinned: Boolean = false
 )
 
 data class ChatProfile(

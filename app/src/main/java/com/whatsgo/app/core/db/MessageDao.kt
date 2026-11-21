@@ -26,6 +26,7 @@ interface MessageDao {
            c.name AS senderName,
            m.status AS status,
            m.mediaType AS mediaType,
+           m.isDeleted AS isDeleted,
            (SELECT COUNT(*) FROM messages u
             WHERE u.chatJid = m.chatJid AND u.fromMe = 0 AND u.isRead = 0) AS unread
     FROM messages m
@@ -100,6 +101,7 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
            m.mediaLocalPath AS mediaLocalPath, m.mediaThumbnail AS mediaThumbnail,
            m.mediaSeconds AS mediaSeconds, m.mediaWaveform AS mediaWaveform, m.mediaAnimated AS mediaAnimated,
            m.mediaFileName AS mediaFileName, m.mediaMimetype AS mediaMimetype,
+           m.isDeleted AS isDeleted, m.isForwarded AS isForwarded, m.isPinned AS isPinned,
            c.name AS senderName,
            q.text AS origText, q.fromMe AS origFromMe, q.senderJid AS origSenderJid,
            q.mediaType AS origMediaType, qc.name AS origSenderName
@@ -114,12 +116,45 @@ AND timestamp <= (SELECT timestamp FROM messages WHERE messageId = :id LIMIT 1)
     fun observeRecent(chatJid: String, limit: Int): Flow<List<MessageRow>>
 
     data class LocalState(
-        val messageId: String,
-        val mediaLocalPath: String?,
-        val status: String,
-        val isRead: Boolean
+        val messageId: String, val mediaLocalPath: String?, val status: String, val isRead: Boolean,
+        val isDeleted: Boolean, val isForwarded: Boolean, val isPinned: Boolean,
+        val pinnedAt: Long, val pinExpiresAt: Long
     )
 
-    @Query("SELECT messageId, mediaLocalPath, status, isRead FROM messages WHERE messageId IN (:ids)")
+    @Query("SELECT messageId, mediaLocalPath, status, isRead, isDeleted, isForwarded, isPinned, pinnedAt, pinExpiresAt FROM messages WHERE messageId IN (:ids)")
     suspend fun localState(ids: List<String>): List<LocalState>
+
+    @Query("""UPDATE messages SET isDeleted = 1, text = '', mediaCaption = NULL, mediaType = NULL,
+    mediaLocalPath = NULL, mediaThumbnail = NULL, mediaUrl = NULL, mediaDirectPath = NULL,
+    mediaKey = NULL, mediaWaveform = NULL, mediaFileName = NULL, isPinned = 0
+    WHERE messageId = :id""")
+    suspend fun markDeleted(id: String)
+
+    @Query("DELETE FROM messages WHERE messageId IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
+    @Query("SELECT * FROM messages WHERE messageId IN (:ids) ORDER BY timestamp ASC")
+    suspend fun getByIds(ids: List<String>): List<MessageEntity>
+
+    @Query("UPDATE messages SET isForwarded = 1 WHERE messageId = :id")
+    suspend fun setForwarded(id: String)
+
+    @Query("UPDATE messages SET isPinned = :pinned, pinnedAt = :at, pinExpiresAt = :expires WHERE messageId = :id")
+    suspend fun setPinned(id: String, pinned: Boolean, at: Long, expires: Long)
+
+    @Query("UPDATE messages SET isPinned = 0 WHERE isPinned = 1 AND pinExpiresAt > 0 AND pinExpiresAt <= :now")
+    suspend fun expirePins(now: Long)
+
+    @Query("""SELECT COUNT(*) FROM messages WHERE chatJid = :chatJid AND isPinned = 1 AND isDeleted = 0
+    AND (pinExpiresAt = 0 OR pinExpiresAt > :now)""")
+    suspend fun countPinned(chatJid: String, now: Long): Int
+
+    data class PinRow(
+        val messageId: String, val text: String, val mediaType: String?, val mediaCaption: String?,
+        val mediaFileName: String?, val fromMe: Boolean, val pinExpiresAt: Long
+    )
+
+    @Query("""SELECT messageId, text, mediaType, mediaCaption, mediaFileName, fromMe, pinExpiresAt
+    FROM messages WHERE chatJid = :chatJid AND isPinned = 1 AND isDeleted = 0 ORDER BY pinnedAt DESC""")
+    fun observePinned(chatJid: String): Flow<List<PinRow>>
 }

@@ -15,9 +15,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StatusEntity::class,
         StatusViewerEntity::class,
         ChannelEntity::class,
-        StickerEntity::class
+        StickerEntity::class,
+        ReceiptEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun statusDao(): StatusDao
     abstract fun channelDao(): ChannelDao
     abstract fun stickerDao(): StickerDao
+    abstract fun receiptDao(): ReceiptDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -85,6 +87,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN isDeleted INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN isForwarded INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN pinnedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN pinExpiresAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `message_receipts` (`messageId` TEXT NOT NULL, `jid` TEXT NOT NULL, `deliveredAt` INTEGER NOT NULL, `readAt` INTEGER NOT NULL, PRIMARY KEY(`messageId`, `jid`))")
+            }
+        }
+
         fun get(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -92,7 +105,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "whatsgo_messages.db"
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration(true)
                     .build().also { instance = it }
             }

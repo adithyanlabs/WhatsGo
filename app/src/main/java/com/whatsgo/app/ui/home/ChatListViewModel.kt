@@ -154,10 +154,14 @@ class ChatListViewModel(app: Application) : AndroidViewModel(app) {
             else -> resolveName(s.chatJid)
         }
 
-        val body = when (s.mediaType) {
-            "image" -> "Image"
-            "video" -> "Video"
-            "voice", "audio" -> "Voice message"
+        val body = when {
+            s.isDeleted -> if (s.fromMe) "You deleted this message" else "This message was deleted"
+            s.mediaType == "image" -> "Image"
+            s.mediaType == "video" -> "Video"
+            s.mediaType == "voice" || s.mediaType == "audio" -> "Voice message"
+            s.mediaType == "sticker" -> "Sticker"
+            s.mediaType == "" -> "Video"
+            s.mediaType == "document" -> "Document"
             else -> s.lastMessage
         }
 

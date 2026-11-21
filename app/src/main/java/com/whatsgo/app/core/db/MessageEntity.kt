@@ -40,5 +40,11 @@ data class MessageEntity(
     val status: String = "sent",
     val mediaSeconds: Int? = null,
     val mediaWaveform: ByteArray? = null,
-    @ColumnInfo(defaultValue = "0") val mediaAnimated: Boolean = false
+
+    @ColumnInfo(defaultValue = "0") val mediaAnimated: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isDeleted: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isForwarded: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val isPinned: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val pinnedAt: Long = 0L,
+    @ColumnInfo(defaultValue = "0") val pinExpiresAt: Long = 0L
 )
